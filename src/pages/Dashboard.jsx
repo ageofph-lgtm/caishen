@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { base44 } from '@/api/base44Client';
@@ -161,14 +160,22 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50">
+      {/* Top Bar with Logo */}
+      <div className="bg-white shadow-md">
+        <div className="max-w-7xl mx-auto py-4 px-6 flex justify-center">
+          <img 
+            src="https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/68e7d9054f905ab0cb15db1c/c02da0b50_Gemini_Generated_Image_b05kdwb05kdwb05k.png" 
+            alt="Caishen Logo" 
+            className="h-20 w-auto"
+          />
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto space-y-6 p-6">
         {/* Header */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-              Lucky Modern
-            </h1>
             <p className="text-gray-600 mt-2">Análise Inteligente de Loterias com IA</p>
           </div>
 
