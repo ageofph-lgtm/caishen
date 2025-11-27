@@ -172,7 +172,7 @@ export default function Generator() {
     return nextDrawDate.toISOString().split('T')[0];
   };
 
-  const generateNumbers = () => {
+  const generateNumbers = async () => {
     if (!currentLottery || allDraws.length < 10) return;
 
     setIsGenerating(true);
