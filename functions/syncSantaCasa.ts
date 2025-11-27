@@ -2,7 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.4';
 
 Deno.serve(async (req) => {
     try {
-        console.log('=== SYNC SANTA CASA - CLEANUP & SYNC ===');
+        console.log('=== SYNC SANTA CASA - ÚLTIMOS 20 RESULTADOS ===');
         
         const base44 = createClientFromRequest(req);
         const user = await base44.auth.me();
@@ -13,81 +13,52 @@ Deno.serve(async (req) => {
 
         const lotteries = await base44.asServiceRole.entities.Lottery.filter({ is_active: true });
         const results = [];
-        let totalDuplicatesRemoved = 0;
 
         for (const lottery of lotteries) {
-            console.log(`\n=== Processing ${lottery.name} ===`);
+            console.log(`\n--- Syncing ${lottery.name} (últimos 20) ---`);
 
-            // STEP 1: Get ALL draws for this lottery
-            const allDraws = await base44.asServiceRole.entities.Draw.filter({
-                lottery_id: lottery.id
-            });
-            console.log(`Total draws in DB: ${allDraws.length}`);
-
-            // STEP 2: Group by date and find duplicates
-            const drawsByDate = {};
-            for (const draw of allDraws) {
-                const date = draw.draw_date;
-                if (!drawsByDate[date]) {
-                    drawsByDate[date] = [];
-                }
-                drawsByDate[date].push(draw);
-            }
-
-            // STEP 3: Delete ALL duplicates - keep only ONE per date
-            let duplicatesDeleted = 0;
-            for (const date in drawsByDate) {
-                const draws = drawsByDate[date];
-                if (draws.length > 1) {
-                    console.log(`Found ${draws.length} duplicates for date ${date}`);
-                    // Keep the first, delete all others
-                    for (let i = 1; i < draws.length; i++) {
-                        try {
-                            await base44.asServiceRole.entities.Draw.delete(draws[i].id);
-                            duplicatesDeleted++;
-                            console.log(`Deleted duplicate ID: ${draws[i].id}`);
-                        } catch (e) {
-                            console.log(`Error deleting: ${e.message}`);
-                        }
-                    }
-                }
-            }
-            
-            totalDuplicatesRemoved += duplicatesDeleted;
-            console.log(`Duplicates removed for ${lottery.name}: ${duplicatesDeleted}`);
-
-            // STEP 4: Get current unique dates after cleanup
-            const cleanDraws = await base44.asServiceRole.entities.Draw.filter({
-                lottery_id: lottery.id
-            });
-            const existingDates = new Set(cleanDraws.map(d => d.draw_date));
-            console.log(`Unique dates after cleanup: ${existingDates.size}`);
-
-            // STEP 5: Fetch new data from Santa Casa
-            let lotteryPrompt = '';
+            let lotteryInfo = '';
             if (lottery.name === 'EuroMilhões') {
-                lotteryPrompt = `EuroMilhões Portugal - jogossantacasa.pt
-Sorteios: Terças e Sextas. ${lottery.main_count} números (1-50) + ${lottery.extra_count} estrelas (1-12)`;
+                lotteryInfo = `EuroMilhões do site jogossantacasa.pt/web/SCCartazResult/euroMilhoes
+                - Sorteios às terças e sextas-feiras
+                - ${lottery.main_count} números principais (1-50)
+                - ${lottery.extra_count} estrelas (1-12)`;
             } else if (lottery.name === 'Totoloto') {
-                lotteryPrompt = `Totoloto Portugal - jogossantacasa.pt
-Sorteios: Quartas e Sábados. ${lottery.main_count} números (1-49) + ${lottery.extra_count} nº sorte (1-13)`;
+                lotteryInfo = `Totoloto do site jogossantacasa.pt/web/SCCartazResult/totolotoNew
+                - Sorteios às quartas e sábados
+                - ${lottery.main_count} números principais (1-49)
+                - ${lottery.extra_count} número da sorte (1-13)`;
             } else if (lottery.name === 'EuroDreams') {
-                lotteryPrompt = `EuroDreams Portugal - jogossantacasa.pt
-Sorteios: Segundas e Quintas. ${lottery.main_count} números (1-40) + ${lottery.extra_count} dream (1-5)`;
+                lotteryInfo = `EuroDreams do site jogossantacasa.pt/web/SCCartazResult/euroDreams
+                - Sorteios às segundas e quintas
+                - ${lottery.main_count} números principais (1-40)
+                - ${lottery.extra_count} número Dream (1-5)`;
             } else {
-                results.push({ lottery: lottery.name, synced: 0, duplicatesRemoved: duplicatesDeleted });
                 continue;
             }
 
+            const prompt = `Busca os ÚLTIMOS 20 SORTEIOS CONSECUTIVOS do ${lotteryInfo}
+
+TAREFA CRÍTICA: Extrai os últimos 20 resultados CONSECUTIVOS desta loteria, SEM FALHAS.
+
+Para cada sorteio retorna:
+- draw_date: Data no formato YYYY-MM-DD
+- main_numbers: Array de ${lottery.main_count} números principais (inteiros)
+- extra_numbers: Array de ${lottery.extra_count || 0} números extras
+
+MUITO IMPORTANTE:
+- Busca TODOS os sorteios, sem pular nenhum
+- EuroMilhões: sorteios às TERÇAS e SEXTAS (2x por semana)
+- Totoloto: sorteios às QUARTAS e SÁBADOS (2x por semana)  
+- EuroDreams: sorteios às SEGUNDAS e QUINTAS (2x por semana)
+- Cada semana deve ter 2 sorteios, não pule nenhum!
+- Retorna exatamente 20 sorteios consecutivos
+- Ordena do mais recente para o mais antigo
+- Não inventes números, usa apenas dados REAIS e OFICIAIS
+- Se um sorteio existe, ele DEVE estar na lista`;
+
             const aiResponse = await base44.asServiceRole.integrations.Core.InvokeLLM({
-                prompt: `Busca os ÚLTIMOS 20 RESULTADOS OFICIAIS do ${lotteryPrompt}
-
-IMPORTANTE: Cada data tem números DIFERENTES. Retorna no formato:
-- draw_date: YYYY-MM-DD
-- main_numbers: array de inteiros
-- extra_numbers: array de inteiros
-
-Dados REAIS e OFICIAIS apenas.`,
+                prompt: prompt,
                 add_context_from_internet: true,
                 response_json_schema: {
                     type: "object",
@@ -98,8 +69,14 @@ Dados REAIS e OFICIAIS apenas.`,
                                 type: "object",
                                 properties: {
                                     draw_date: { type: "string" },
-                                    main_numbers: { type: "array", items: { type: "integer" } },
-                                    extra_numbers: { type: "array", items: { type: "integer" } }
+                                    main_numbers: {
+                                        type: "array",
+                                        items: { type: "integer" }
+                                    },
+                                    extra_numbers: {
+                                        type: "array",
+                                        items: { type: "integer" }
+                                    }
                                 }
                             }
                         }
@@ -107,69 +84,117 @@ Dados REAIS e OFICIAIS apenas.`,
                 }
             });
 
-            // STEP 6: Insert only NEW dates
+            console.log('AI Response draws count:', aiResponse?.draws?.length || 0);
+
+            if (!aiResponse || !aiResponse.draws || aiResponse.draws.length === 0) {
+                results.push({
+                    lottery: lottery.name,
+                    synced: 0,
+                    message: 'Não foi possível obter dados'
+                });
+                continue;
+            }
+
+            // Get existing draws for this lottery
+            const existingDraws = await base44.asServiceRole.entities.Draw.filter({
+                lottery_id: lottery.id
+            });
+
+            console.log('Existing draws:', existingDraws.length);
+
             let syncedCount = 0;
             const newDraws = [];
 
-            if (aiResponse?.draws) {
-                for (const draw of aiResponse.draws) {
-                    // Validate
-                    if (!draw.draw_date || !Array.isArray(draw.main_numbers)) continue;
-                    if (draw.main_numbers.length !== lottery.main_count) continue;
-                    if (!/^\d{4}-\d{2}-\d{2}$/.test(draw.draw_date)) continue;
+            for (const draw of aiResponse.draws) {
+                // Validate draw data
+                if (!draw.draw_date || !draw.main_numbers) continue;
+                if (!Array.isArray(draw.main_numbers)) continue;
+                if (draw.main_numbers.length !== lottery.main_count) continue;
 
-                    // Skip if date exists
-                    if (existingDates.has(draw.draw_date)) {
-                        console.log(`Skipping existing date: ${draw.draw_date}`);
-                        continue;
-                    }
+                // Check if already exists (by date AND numbers)
+                const isDuplicate = existingDraws.some(d => {
+                    if (d.draw_date !== draw.draw_date) return false;
+                    const existingMain = JSON.stringify([...d.main_numbers].sort());
+                    const newMain = JSON.stringify([...draw.main_numbers].sort());
+                    return existingMain === newMain;
+                });
 
+                if (!isDuplicate) {
                     newDraws.push({
                         lottery_id: lottery.id,
                         draw_date: draw.draw_date,
-                        main_numbers: draw.main_numbers.map(n => parseInt(n)),
-                        extra_numbers: (draw.extra_numbers || []).map(n => parseInt(n))
+                        main_numbers: draw.main_numbers,
+                        extra_numbers: draw.extra_numbers || []
                     });
-                    existingDates.add(draw.draw_date);
                     syncedCount++;
                 }
+            }
 
-                if (newDraws.length > 0) {
-                    await base44.asServiceRole.entities.Draw.bulkCreate(newDraws);
-                    console.log(`Created ${newDraws.length} new draws`);
-                }
+            // Bulk create new draws
+            if (newDraws.length > 0) {
+                await base44.asServiceRole.entities.Draw.bulkCreate(newDraws);
+                console.log(`Created ${newDraws.length} new draws`);
             }
 
             results.push({
                 lottery: lottery.name,
                 synced: syncedCount,
-                duplicatesRemoved: duplicatesDeleted
+                total_found: aiResponse.draws.length,
+                message: syncedCount > 0 
+                    ? `${syncedCount} novo(s) sorteio(s) adicionado(s)`
+                    : 'Todos os sorteios já existem'
             });
+
+            // Auto-validate suggestions for new draws
+            if (syncedCount > 0) {
+                const suggestions = await base44.asServiceRole.entities.Suggestion.list();
+                
+                for (const draw of newDraws) {
+                    const toValidate = suggestions.filter(s => 
+                        s.lottery_id === lottery.id && 
+                        s.draw_date === draw.draw_date && 
+                        !s.was_validated
+                    );
+
+                    for (const sugg of toValidate) {
+                        const matchesMain = sugg.main_numbers.filter(n => 
+                            draw.main_numbers.includes(n)
+                        ).length;
+
+                        const matchesExtra = (sugg.extra_numbers || []).filter(n => 
+                            (draw.extra_numbers || []).includes(n)
+                        ).length;
+
+                        await base44.asServiceRole.entities.Suggestion.update(sugg.id, {
+                            actual_main_numbers: draw.main_numbers,
+                            actual_extra_numbers: draw.extra_numbers || [],
+                            matches_main: matchesMain,
+                            matches_extra: matchesExtra,
+                            was_validated: true
+                        });
+
+                        console.log(`✓ Validated: ${matchesMain} main + ${matchesExtra} extra`);
+                    }
+                }
+            }
         }
 
         const totalSynced = results.reduce((sum, r) => sum + r.synced, 0);
 
-        let message = '';
-        if (totalDuplicatesRemoved > 0 && totalSynced > 0) {
-            message = `✓ ${totalDuplicatesRemoved} duplicados removidos, ${totalSynced} novos adicionados`;
-        } else if (totalDuplicatesRemoved > 0) {
-            message = `✓ ${totalDuplicatesRemoved} duplicados removidos`;
-        } else if (totalSynced > 0) {
-            message = `✓ ${totalSynced} novos sorteios sincronizados`;
-        } else {
-            message = '✓ Base de dados já está atualizada';
-        }
-
         return Response.json({
             success: true,
-            message: message,
+            message: totalSynced > 0 
+                ? `✓ ${totalSynced} novo(s) sorteio(s) sincronizado(s)`
+                : '✓ Base de dados já atualizada',
             total_synced: totalSynced,
-            duplicates_removed: totalDuplicatesRemoved,
             results: results
         });
 
     } catch (error) {
         console.error('Error:', error.message);
-        return Response.json({ success: false, error: error.message }, { status: 500 });
+        return Response.json({ 
+            success: false,
+            error: error.message 
+        }, { status: 500 });
     }
 });
