@@ -172,13 +172,13 @@ export default function Generator() {
     return nextDrawDate.toISOString().split('T')[0];
   };
 
-  const generateNumbers = async () => {
+  const generateNumbers = () => {
     if (!currentLottery || allDraws.length < 10) return;
 
     setIsGenerating(true);
     setLearningInsights(null);
     
-    setTimeout(() => {
+    setTimeout(async () => {
       console.log('\n🎲 === GENERATING NUMBERS ===');
       console.log('📊 Using', allDraws.length, 'historical draws');
       console.log('🧠 Learning from', validatedSuggestions.length, 'validated suggestions');
