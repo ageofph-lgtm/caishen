@@ -24,13 +24,23 @@ export default function History() {
   const deleteMutation = useMutation({
     mutationFn: async (drawIds) => {
       for (const id of drawIds) {
-        await base44.entities.Draw.delete(id);
+        try {
+          await base44.entities.Draw.delete(id);
+        } catch (err) {
+          console.error('Error deleting draw:', id, err);
+        }
       }
+      return drawIds.length;
     },
-    onSuccess: () => {
+    onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ['draws'] });
+      queryClient.invalidateQueries({ queryKey: ['all-draws'] });
       setSelectedDraws([]);
-      setMessage({ type: 'success', text: 'Sorteios apagados com sucesso!' });
+      setMessage({ type: 'success', text: `${count} sorteio(s) apagado(s) com sucesso!` });
+      setTimeout(() => setMessage(null), 3000);
+    },
+    onError: (error) => {
+      setMessage({ type: 'error', text: 'Erro ao apagar: ' + error.message });
       setTimeout(() => setMessage(null), 3000);
     }
   });
