@@ -18,6 +18,7 @@ export default function Dashboard() {
   const [selectedLottery, setSelectedLottery] = useState(null);
   const [showDataPanel, setShowDataPanel] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isRepopulating, setIsRepopulating] = useState(false);
   const [syncMessage, setSyncMessage] = useState(null);
 
   const queryClient = useQueryClient();
@@ -71,35 +72,66 @@ export default function Dashboard() {
   }, [lotteries, selectedLottery]);
 
   const handleSync = async () => {
-    setIsSyncing(true);
-    setSyncMessage(null);
+        setIsSyncing(true);
+        setSyncMessage(null);
 
-    try {
-      const response = await base44.functions.invoke('syncLotteryDraws');
+        try {
+          const response = await base44.functions.invoke('syncLotteryDraws');
 
-      if (response.data.success) {
-        setSyncMessage({
-          type: 'success',
-          text: response.data.message
-        });
-        queryClient.invalidateQueries({ queryKey: ['draws'] });
-        queryClient.invalidateQueries({ queryKey: ['all-draws'] });
-      } else {
-        setSyncMessage({
-          type: 'error',
-          text: response.data.message || 'Erro desconhecido ao sincronizar.'
-        });
-      }
-    } catch (error) {
-      setSyncMessage({
-        type: 'error',
-        text: error.message || 'Erro ao sincronizar'
-      });
-    } finally {
-      setIsSyncing(false);
-      setTimeout(() => setSyncMessage(null), 5000);
-    }
-  };
+          if (response.data.success) {
+            setSyncMessage({
+              type: 'success',
+              text: response.data.message
+            });
+            queryClient.invalidateQueries({ queryKey: ['draws'] });
+            queryClient.invalidateQueries({ queryKey: ['all-draws'] });
+          } else {
+            setSyncMessage({
+              type: 'error',
+              text: response.data.message || 'Erro desconhecido ao sincronizar.'
+            });
+          }
+        } catch (error) {
+          setSyncMessage({
+            type: 'error',
+            text: error.message || 'Erro ao sincronizar'
+          });
+        } finally {
+          setIsSyncing(false);
+          setTimeout(() => setSyncMessage(null), 5000);
+        }
+      };
+
+      const handleRepopulate = async () => {
+        setIsRepopulating(true);
+        setSyncMessage({ type: 'info', text: '⏳ Recuperando dados históricos... Isso pode demorar alguns minutos.' });
+
+        try {
+          const response = await base44.functions.invoke('repopulateDraws');
+
+          if (response.data.success) {
+            setSyncMessage({
+              type: 'success',
+              text: response.data.message
+            });
+            queryClient.invalidateQueries({ queryKey: ['draws'] });
+            queryClient.invalidateQueries({ queryKey: ['all-draws'] });
+          } else {
+            setSyncMessage({
+              type: 'error',
+              text: response.data.error || 'Erro ao recuperar dados.'
+            });
+          }
+        } catch (error) {
+          setSyncMessage({
+            type: 'error',
+            text: error.message || 'Erro ao recuperar'
+          });
+        } finally {
+          setIsRepopulating(false);
+          setTimeout(() => setSyncMessage(null), 10000);
+        }
+      };
 
   const calculateFrequency = () => {
     const freqMap = {};
@@ -174,10 +206,20 @@ export default function Dashboard() {
             <Button
               variant="outline"
               onClick={handleSync}
-              disabled={isSyncing}
+              disabled={isSyncing || isRepopulating}
             >
               <RefreshCw className={`w-4 h-4 mr-2 ${isSyncing ? 'animate-spin' : ''}`} />
               {isSyncing ? 'Sincronizando...' : 'Sincronizar'}
+            </Button>
+
+            <Button
+              variant="default"
+              onClick={handleRepopulate}
+              disabled={isSyncing || isRepopulating}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              <Database className={`w-4 h-4 mr-2 ${isRepopulating ? 'animate-spin' : ''}`} />
+              {isRepopulating ? 'Recuperando...' : 'Recuperar Dados'}
             </Button>
 
             <Button
