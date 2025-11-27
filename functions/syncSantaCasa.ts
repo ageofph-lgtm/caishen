@@ -37,9 +37,9 @@ Deno.serve(async (req) => {
                 continue;
             }
 
-            const prompt = `Busca os ÚLTIMOS 20 SORTEIOS CONSECUTIVOS do ${lotteryInfo}
+            const prompt = `Busca os ÚLTIMOS 50 SORTEIOS CONSECUTIVOS do ${lotteryInfo}
 
-TAREFA CRÍTICA: Extrai os últimos 20 resultados CONSECUTIVOS desta loteria, SEM FALHAS.
+TAREFA CRÍTICA: Extrai os últimos 50 resultados CONSECUTIVOS desta loteria, SEM FALHAS.
 
 Para cada sorteio retorna:
 - draw_date: Data no formato YYYY-MM-DD
@@ -47,12 +47,12 @@ Para cada sorteio retorna:
 - extra_numbers: Array de ${lottery.extra_count || 0} números extras
 
 MUITO IMPORTANTE:
-- Busca TODOS os sorteios, sem pular nenhum
+- Busca TODOS os 50 sorteios mais recentes, sem pular nenhum
 - EuroMilhões: sorteios às TERÇAS e SEXTAS (2x por semana)
 - Totoloto: sorteios às QUARTAS e SÁBADOS (2x por semana)  
 - EuroDreams: sorteios às SEGUNDAS e QUINTAS (2x por semana)
 - Cada semana deve ter 2 sorteios, não pule nenhum!
-- Retorna exatamente 20 sorteios consecutivos
+- Retorna exatamente 50 sorteios consecutivos (aproximadamente 6 meses)
 - Ordena do mais recente para o mais antigo
 - Não inventes números, usa apenas dados REAIS e OFICIAIS
 - Se um sorteio existe, ele DEVE estar na lista`;
