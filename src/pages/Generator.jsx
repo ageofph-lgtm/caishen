@@ -388,7 +388,87 @@ export default function Generator() {
         }
       }
       }, 1500);
-  };
+      };
+
+      // Gerar números para todas as loterias automaticamente ao carregar
+      const generateForAllLotteries = async () => {
+      for (const lottery of lotteries) {
+        const draws = await base44.entities.Draw.filter({ lottery_id: lottery.id });
+        if (draws.length < 10) continue;
+
+        const nextDrawDate = (() => {
+          const today = new Date();
+          const dayOfWeek = today.getDay();
+          let nextDate = new Date(today);
+
+          if (lottery.name === 'EuroMilhões') {
+            if (dayOfWeek < 2) nextDate.setDate(today.getDate() + (2 - dayOfWeek));
+            else if (dayOfWeek >= 2 && dayOfWeek < 5) nextDate.setDate(today.getDate() + (5 - dayOfWeek));
+            else nextDate.setDate(today.getDate() + (9 - dayOfWeek));
+          } else if (lottery.name === 'Totoloto') {
+            if (dayOfWeek < 3) nextDate.setDate(today.getDate() + (3 - dayOfWeek));
+            else if (dayOfWeek >= 3 && dayOfWeek < 6) nextDate.setDate(today.getDate() + (6 - dayOfWeek));
+            else nextDate.setDate(today.getDate() + (10 - dayOfWeek));
+          } else if (lottery.name === 'EuroDreams') {
+            if (dayOfWeek === 0) nextDate.setDate(today.getDate() + 1);
+            else if (dayOfWeek < 4) nextDate.setDate(today.getDate() + (4 - dayOfWeek));
+            else nextDate.setDate(today.getDate() + (8 - dayOfWeek));
+          }
+          return nextDate.toISOString().split('T')[0];
+        })();
+
+        // Verificar se já existe sugestão para essa data
+        const existing = await base44.entities.Suggestion.filter({
+          lottery_id: lottery.id,
+          draw_date: nextDrawDate
+        });
+
+        if (existing.length > 0) continue;
+
+        // Gerar números simples para auto-save
+        const freqMap = {};
+        draws.forEach(d => d.main_numbers?.forEach(n => freqMap[n] = (freqMap[n] || 0) + 1));
+
+        const pool = [];
+        for (let i = lottery.main_min; i <= lottery.main_max; i++) {
+          const weight = Math.max(1, (freqMap[i] || 0) * 10);
+          for (let j = 0; j < weight; j++) pool.push(i);
+        }
+
+        const mainNumbers = [];
+        while (mainNumbers.length < lottery.main_count && pool.length > 0) {
+          const idx = Math.floor(Math.random() * pool.length);
+          const num = pool[idx];
+          if (!mainNumbers.includes(num)) mainNumbers.push(num);
+          pool.splice(idx, 1);
+        }
+        mainNumbers.sort((a, b) => a - b);
+
+        const extraNumbers = [];
+        if (lottery.extra_count > 0) {
+          const extraPool = [];
+          for (let i = lottery.extra_min; i <= lottery.extra_max; i++) extraPool.push(i);
+          while (extraNumbers.length < lottery.extra_count && extraPool.length > 0) {
+            const idx = Math.floor(Math.random() * extraPool.length);
+            extraNumbers.push(extraPool.splice(idx, 1)[0]);
+          }
+          extraNumbers.sort((a, b) => a - b);
+        }
+
+        await base44.entities.Suggestion.create({
+          lottery_id: lottery.id,
+          draw_date: nextDrawDate,
+          main_numbers: mainNumbers,
+          extra_numbers: extraNumbers,
+          algorithm: 'auto_batch',
+          confidence_score: 0.75,
+          was_validated: false,
+          notes: `Gerado automaticamente em ${new Date().toLocaleString('pt-PT')}`
+        });
+
+        console.log(`✅ Auto-gerado para ${lottery.name}: ${mainNumbers.join(', ')}`);
+      }
+      };
 
   const saveSuggestion = async () => {
     if (!generatedNumbers || !selectedLottery) {
