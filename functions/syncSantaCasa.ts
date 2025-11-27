@@ -37,20 +37,25 @@ Deno.serve(async (req) => {
                 continue;
             }
 
-            const prompt = `Busca os ÚLTIMOS 20 SORTEIOS do ${lotteryInfo}
+            const prompt = `Busca os ÚLTIMOS 20 SORTEIOS CONSECUTIVOS do ${lotteryInfo}
 
-TAREFA: Extrai os últimos 20 resultados oficiais desta loteria.
+TAREFA CRÍTICA: Extrai os últimos 20 resultados CONSECUTIVOS desta loteria, SEM FALHAS.
 
 Para cada sorteio retorna:
 - draw_date: Data no formato YYYY-MM-DD
 - main_numbers: Array de ${lottery.main_count} números principais (inteiros)
 - extra_numbers: Array de ${lottery.extra_count || 0} números extras
 
-IMPORTANTE:
-- Busca dados REAIS e OFICIAIS do site da Santa Casa
-- Retorna exatamente 20 sorteios (ou menos se não houver tantos)
+MUITO IMPORTANTE:
+- Busca TODOS os sorteios, sem pular nenhum
+- EuroMilhões: sorteios às TERÇAS e SEXTAS (2x por semana)
+- Totoloto: sorteios às QUARTAS e SÁBADOS (2x por semana)  
+- EuroDreams: sorteios às SEGUNDAS e QUINTAS (2x por semana)
+- Cada semana deve ter 2 sorteios, não pule nenhum!
+- Retorna exatamente 20 sorteios consecutivos
 - Ordena do mais recente para o mais antigo
-- Não inventes números, usa apenas dados reais`;
+- Não inventes números, usa apenas dados REAIS e OFICIAIS
+- Se um sorteio existe, ele DEVE estar na lista`;
 
             const aiResponse = await base44.asServiceRole.integrations.Core.InvokeLLM({
                 prompt: prompt,

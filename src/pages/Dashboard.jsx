@@ -18,7 +18,6 @@ export default function Dashboard() {
   const [selectedLottery, setSelectedLottery] = useState(null);
   const [showDataPanel, setShowDataPanel] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [isCleaning, setIsCleaning] = useState(false);
   const [syncMessage, setSyncMessage] = useState(null);
 
   const queryClient = useQueryClient();
@@ -70,37 +69,6 @@ export default function Dashboard() {
       setSelectedLottery(lotteries[0].id);
     }
   }, [lotteries, selectedLottery]);
-
-  const handleCleanup = async () => {
-    setIsCleaning(true);
-    setSyncMessage(null);
-
-    try {
-      const response = await base44.functions.invoke('cleanupOldDraws');
-
-      if (response.data.success) {
-        setSyncMessage({
-          type: 'success',
-          text: response.data.message
-        });
-        queryClient.invalidateQueries({ queryKey: ['draws'] });
-        queryClient.invalidateQueries({ queryKey: ['all-draws'] });
-      } else {
-        setSyncMessage({
-          type: 'error',
-          text: response.data.message || 'Erro desconhecido ao limpar.'
-        });
-      }
-    } catch (error) {
-      setSyncMessage({
-        type: 'error',
-        text: error.message || 'Erro ao limpar'
-      });
-    } finally {
-      setIsCleaning(false);
-      setTimeout(() => setSyncMessage(null), 5000);
-    }
-  };
 
   const handleSync = async () => {
     setIsSyncing(true);
@@ -193,20 +161,20 @@ export default function Dashboard() {
               </SelectContent>
             </Select>
 
-            <Button
-              variant="outline"
-              onClick={handleCleanup}
-              disabled={isCleaning || isSyncing}
-              className="bg-red-50 hover:bg-red-100 border-red-200"
-            >
-              <AlertCircle className={`w-4 h-4 mr-2 ${isCleaning ? 'animate-spin' : ''}`} />
-              {isCleaning ? 'Limpando...' : 'Limpar Antigos'}
-            </Button>
+            <Link to={createPageUrl('History')}>
+              <Button
+                variant="outline"
+                className="bg-red-50 hover:bg-red-100 border-red-200"
+              >
+                <AlertCircle className="w-4 h-4 mr-2" />
+                Limpeza Manual
+              </Button>
+            </Link>
 
             <Button
               variant="outline"
               onClick={handleSync}
-              disabled={isSyncing || isCleaning}
+              disabled={isSyncing}
             >
               <RefreshCw className={`w-4 h-4 mr-2 ${isSyncing ? 'animate-spin' : ''}`} />
               {isSyncing ? 'Sincronizando...' : 'Sincronizar'}
