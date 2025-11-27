@@ -1,20 +1,72 @@
-
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { base44 } from '@/api/base44Client';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
-import { ArrowLeft, Search, Calendar, Filter, BarChart3 } from 'lucide-react';
+import { ArrowLeft, Search, Calendar, Filter, BarChart3, Trash2, RefreshCw, Loader2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import DrawCard from '../components/lottery/DrawCard';
 
 export default function History() {
   const [selectedLottery, setSelectedLottery] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState('all');
+  const [selectedDraws, setSelectedDraws] = useState([]);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [message, setMessage] = useState(null);
+
+  const queryClient = useQueryClient();
+
+  const deleteMutation = useMutation({
+    mutationFn: async (drawIds) => {
+      for (const id of drawIds) {
+        await base44.entities.Draw.delete(id);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['draws'] });
+      setSelectedDraws([]);
+      setMessage({ type: 'success', text: 'Sorteios apagados com sucesso!' });
+      setTimeout(() => setMessage(null), 3000);
+    }
+  });
+
+  const handleSync = async () => {
+    setIsSyncing(true);
+    setMessage(null);
+    try {
+      const response = await base44.functions.invoke('syncSantaCasa');
+      setMessage({ 
+        type: response.data.success ? 'success' : 'error', 
+        text: response.data.message 
+      });
+      queryClient.invalidateQueries({ queryKey: ['draws'] });
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message });
+    } finally {
+      setIsSyncing(false);
+      setTimeout(() => setMessage(null), 5000);
+    }
+  };
+
+  const toggleSelectDraw = (drawId) => {
+    setSelectedDraws(prev => 
+      prev.includes(drawId) 
+        ? prev.filter(id => id !== drawId)
+        : [...prev, drawId]
+    );
+  };
+
+  const handleDeleteSelected = () => {
+    if (selectedDraws.length === 0) return;
+    if (confirm(`Tem certeza que deseja apagar ${selectedDraws.length} sorteio(s)?`)) {
+      deleteMutation.mutate(selectedDraws);
+    }
+  };
 
   const { data: lotteries = [] } = useQuery({
     queryKey: ['lotteries'],
@@ -85,7 +137,7 @@ export default function History() {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-purple-50 p-6">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-4">
           <div className="flex items-center gap-4">
             <Link to={createPageUrl('Dashboard')}>
               <Button variant="outline" size="icon">
@@ -97,7 +149,40 @@ export default function History() {
               <p className="text-gray-600">Consulte todos os sorteios realizados</p>
             </div>
           </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={handleSync}
+              disabled={isSyncing}
+              className="bg-green-50 hover:bg-green-100 border-green-200"
+            >
+              {isSyncing ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <RefreshCw className="w-4 h-4 mr-2" />
+              )}
+              Sincronizar Santa Casa
+            </Button>
+            {selectedDraws.length > 0 && (
+              <Button
+                variant="destructive"
+                onClick={handleDeleteSelected}
+                disabled={deleteMutation.isPending}
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Apagar ({selectedDraws.length})
+              </Button>
+            )}
+          </div>
         </div>
+
+        {message && (
+          <Alert className={message.type === 'success' ? 'border-green-500 bg-green-50' : 'border-red-500 bg-red-50'}>
+            <AlertDescription className={message.type === 'success' ? 'text-green-800' : 'text-red-800'}>
+              {message.text}
+            </AlertDescription>
+          </Alert>
+        )}
 
         {/* Filters */}
         <Card>
@@ -185,7 +270,19 @@ export default function History() {
         {/* Draws Grid */}
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredDraws.map(draw => (
-            <DrawCard key={draw.id} draw={draw} />
+            <div key={draw.id} className="relative">
+              <div 
+                className={`absolute top-2 left-2 z-10 w-6 h-6 rounded-full border-2 cursor-pointer flex items-center justify-center transition-all ${
+                  selectedDraws.includes(draw.id) 
+                    ? 'bg-red-500 border-red-500 text-white' 
+                    : 'bg-white border-gray-300 hover:border-red-400'
+                }`}
+                onClick={() => toggleSelectDraw(draw.id)}
+              >
+                {selectedDraws.includes(draw.id) && <Trash2 className="w-3 h-3" />}
+              </div>
+              <DrawCard draw={draw} />
+            </div>
           ))}
         </div>
 
