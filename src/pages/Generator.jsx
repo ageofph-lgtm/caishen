@@ -467,8 +467,8 @@ export default function Generator() {
         });
 
         console.log(`✅ Auto-gerado para ${lottery.name}: ${mainNumbers.join(', ')}`);
-      }
-      };
+        }
+        };
 
   const saveSuggestion = async () => {
     if (!generatedNumbers || !selectedLottery) {
