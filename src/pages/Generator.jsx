@@ -4,7 +4,7 @@ import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Sparkles, Loader2, ArrowLeft, Save, RefreshCw, Brain } from 'lucide-react';
+import { Sparkles, Loader2, ArrowLeft, Save, RefreshCw, TrendingUp, Brain } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -350,10 +350,44 @@ export default function Generator() {
       setLearningInsights(insights);
       setGeneratedNumbers({ mainNumbers, extraNumbers });
       setIsGenerating(false);
-      
+
       console.log('📊 Insights:', insights);
       console.log('=== GENERATION COMPLETE ===\n');
-    }, 1500);
+
+      // AUTO-SAVE: Salva automaticamente a sugestão
+      const nextDrawDate = calculateNextDrawDate();
+      if (nextDrawDate && selectedLottery) {
+        try {
+          const existingSuggestions = await base44.entities.Suggestion.filter({
+            lottery_id: selectedLottery,
+            draw_date: nextDrawDate
+          });
+
+          if (existingSuggestions.length === 0) {
+            await base44.entities.Suggestion.create({
+              lottery_id: selectedLottery,
+              draw_date: nextDrawDate,
+              main_numbers: mainNumbers,
+              extra_numbers: extraNumbers,
+              algorithm: 'auto_learning_ai',
+              parameters: {
+                weights: settings.weights,
+                learned_from_suggestions: validatedSuggestions.length,
+                total_draws_analyzed: allDraws.length,
+                auto_saved: true
+              },
+              confidence_score: 0.80,
+              was_validated: false,
+              notes: `Auto-salvo em ${new Date().toLocaleString('pt-PT')}`
+            });
+            console.log('✅ Sugestão salva automaticamente');
+            queryClient.invalidateQueries({ queryKey: ['suggestions'] });
+          }
+        } catch (autoSaveError) {
+          console.error('Erro ao auto-salvar:', autoSaveError);
+        }
+      }
+      }, 1500);
   };
 
   const saveSuggestion = async () => {
