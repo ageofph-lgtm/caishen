@@ -387,11 +387,11 @@ export default function Generator() {
           console.error('Erro ao auto-salvar:', autoSaveError);
         }
       }
-      }, 1500);
-      };
+    }, 1500);
+  };
 
-      // Gerar números para todas as loterias automaticamente ao carregar
-      const generateForAllLotteries = async () => {
+  // Gerar números para todas as loterias automaticamente ao carregar
+  const generateForAllLotteries = async () => {
       for (const lottery of lotteries) {
         const draws = await base44.entities.Draw.filter({ lottery_id: lottery.id });
         if (draws.length < 10) continue;
