@@ -55,32 +55,50 @@ Deno.serve(async (req) => {
                 continue;
             }
 
-            // Fetch historical data in batches by year
-            const years = lottery.name === 'EuroDreams' 
-                ? [2023, 2024, 2025]
-                : [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025];
+            // Fetch in smaller batches (3 months at a time) to avoid JSON errors
+            const periods = lottery.name === 'EuroDreams' 
+                ? [
+                    '2023-10-01 a 2023-12-31',
+                    '2024-01-01 a 2024-03-31',
+                    '2024-04-01 a 2024-06-30',
+                    '2024-07-01 a 2024-09-30',
+                    '2024-10-01 a 2024-12-10'
+                  ]
+                : [
+                    '2015-01-01 a 2015-06-30', '2015-07-01 a 2015-12-31',
+                    '2016-01-01 a 2016-06-30', '2016-07-01 a 2016-12-31',
+                    '2017-01-01 a 2017-06-30', '2017-07-01 a 2017-12-31',
+                    '2018-01-01 a 2018-06-30', '2018-07-01 a 2018-12-31',
+                    '2019-01-01 a 2019-06-30', '2019-07-01 a 2019-12-31',
+                    '2020-01-01 a 2020-06-30', '2020-07-01 a 2020-12-31',
+                    '2021-01-01 a 2021-06-30', '2021-07-01 a 2021-12-31',
+                    '2022-01-01 a 2022-06-30', '2022-07-01 a 2022-12-31',
+                    '2023-01-01 a 2023-06-30', '2023-07-01 a 2023-12-31',
+                    '2024-01-01 a 2024-06-30', '2024-07-01 a 2024-12-10'
+                  ];
+
+            // Get existing draws ONCE
+            const existingDraws = await base44.asServiceRole.entities.Draw.filter({
+                lottery_id: lottery.id
+            });
+            const existingDates = new Set(existingDraws.map(d => d.draw_date));
 
             let totalAdded = 0;
 
-            for (const year of years) {
-                console.log(`Fetching ${lottery.name} ${year}...`);
+            for (const period of periods) {
+                console.log(`Fetching ${lottery.name} ${period}...`);
 
-                const prompt = `Busca TODOS os sorteios do ${lotteryInfo} do ano ${year}.
-
-TAREFA: Extrai TODOS os resultados oficiais de ${year}.
+                const prompt = `Busca TODOS os sorteios do ${lottery.name} do período ${period} no site oficial jogossantacasa.pt
 
 Para cada sorteio retorna:
-- draw_date: Data no formato YYYY-MM-DD
-- main_numbers: Array de ${lottery.main_count} números principais (inteiros)
-- extra_numbers: Array de ${lottery.extra_count || 0} números extras
+- draw_date: YYYY-MM-DD
+- main_numbers: [${lottery.main_count} números inteiros]
+- extra_numbers: [${lottery.extra_count || 0} números inteiros]
 
-IMPORTANTE:
-- Busca dados REAIS e OFICIAIS
-- Retorna TODOS os sorteios do ano ${year}
-- São aproximadamente 104 sorteios por ano (2 por semana)
-- ${year === 2025 ? 'Para 2025, busca até 27 de novembro' : ''}
-- Não inventes números, usa apenas dados reais
-- Se não encontrar dados de um ano, retorna array vazio`;
+CRÍTICO:
+- Dados REAIS do site oficial
+- Aproximadamente 26 sorteios por semestre (2 por semana)
+- Não inventa números`;
 
                 try {
                     const aiResponse = await base44.asServiceRole.integrations.Core.InvokeLLM({
@@ -95,14 +113,8 @@ IMPORTANTE:
                                         type: "object",
                                         properties: {
                                             draw_date: { type: "string" },
-                                            main_numbers: {
-                                                type: "array",
-                                                items: { type: "integer" }
-                                            },
-                                            extra_numbers: {
-                                                type: "array",
-                                                items: { type: "integer" }
-                                            }
+                                            main_numbers: { type: "array", items: { type: "integer" } },
+                                            extra_numbers: { type: "array", items: { type: "integer" } }
                                         }
                                     }
                                 }
@@ -111,13 +123,6 @@ IMPORTANTE:
                     });
 
                     if (aiResponse?.draws?.length > 0) {
-                        // Get existing draws
-                        const existingDraws = await base44.asServiceRole.entities.Draw.filter({
-                            lottery_id: lottery.id
-                        });
-
-                        const existingDates = new Set(existingDraws.map(d => d.draw_date));
-
                         const newDraws = [];
                         for (const draw of aiResponse.draws) {
                             if (!draw.draw_date || !draw.main_numbers) continue;
@@ -128,24 +133,22 @@ IMPORTANTE:
                             newDraws.push({
                                 lottery_id: lottery.id,
                                 draw_date: draw.draw_date,
-                                main_numbers: draw.main_numbers,
-                                extra_numbers: draw.extra_numbers || []
+                                main_numbers: draw.main_numbers.sort((a, b) => a - b),
+                                extra_numbers: (draw.extra_numbers || []).sort((a, b) => a - b)
                             });
                             existingDates.add(draw.draw_date);
                         }
 
                         if (newDraws.length > 0) {
-                            // Bulk create in batches of 50
-                            for (let i = 0; i < newDraws.length; i += 50) {
-                                const batch = newDraws.slice(i, i + 50);
-                                await base44.asServiceRole.entities.Draw.bulkCreate(batch);
-                            }
+                            await base44.asServiceRole.entities.Draw.bulkCreate(newDraws);
                             totalAdded += newDraws.length;
-                            console.log(`Added ${newDraws.length} draws for ${year}`);
+                            console.log(`✓ Added ${newDraws.length} draws for ${period}`);
+                        } else {
+                            console.log(`No new draws for ${period}`);
                         }
                     }
                 } catch (error) {
-                    console.error(`Error fetching ${year}:`, error.message);
+                    console.error(`Error ${period}:`, error.message);
                 }
             }
 
