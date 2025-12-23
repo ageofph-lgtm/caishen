@@ -217,58 +217,61 @@ IMPORTANTE:
         console.log('=== SYNC ALL COMPLETED ===');
         console.log('Total synced:', totalSynced);
 
-        // AUTOMATICALLY VALIDATE SUGGESTIONS AFTER SYNC
+        // AUTOMATICALLY VALIDATE ALL SUGGESTIONS (not just new ones)
+        console.log('\n=== AUTO-VALIDATING ALL SUGGESTIONS ===');
         let validationResult = { validated: 0, total_matches: 0 };
         
-        if (totalSynced > 0) {
-            console.log('\n=== AUTO-VALIDATING SUGGESTIONS ===');
+        try {
+            // Get ALL suggestions and ALL draws
+            const allSuggestions = await base44.asServiceRole.entities.Suggestion.list();
+            const allDraws = await base44.asServiceRole.entities.Draw.list();
             
-            try {
-                const allSuggestions = await base44.asServiceRole.entities.Suggestion.list();
-                const suggestionsToValidate = allSuggestions.filter(s => !s.was_validated && s.draw_date);
+            console.log('Total suggestions:', allSuggestions.length);
+            console.log('Total draws:', allDraws.length);
 
-                console.log('Suggestions to validate:', suggestionsToValidate.length);
+            for (const suggestion of allSuggestions) {
+                // Skip if already validated
+                if (suggestion.was_validated) continue;
+                
+                // Find matching draw by lottery_id AND draw_date
+                const matchingDraw = allDraws.find(d => 
+                    d.lottery_id === suggestion.lottery_id && 
+                    d.draw_date === suggestion.draw_date
+                );
 
-                for (const suggestion of suggestionsToValidate) {
-                    const allDraws = await base44.asServiceRole.entities.Draw.list();
-                    const matchingDraws = allDraws.filter(d => 
-                        d.lottery_id === suggestion.lottery_id && 
-                        d.draw_date === suggestion.draw_date
-                    );
-
-                    if (matchingDraws.length === 0) continue;
-
-                    const actualDraw = matchingDraws[0];
-
-                    const matchesMain = suggestion.main_numbers.filter(num => 
-                        actualDraw.main_numbers.includes(num)
-                    ).length;
-
-                    const matchesExtra = (suggestion.extra_numbers || []).filter(num => 
-                        (actualDraw.extra_numbers || []).includes(num)
-                    ).length;
-
-                    await base44.asServiceRole.entities.Suggestion.update(suggestion.id, {
-                        actual_main_numbers: actualDraw.main_numbers,
-                        actual_extra_numbers: actualDraw.extra_numbers || [],
-                        matches_main: matchesMain,
-                        matches_extra: matchesExtra,
-                        was_validated: true
-                    });
-
-                    validationResult.validated++;
-                    validationResult.total_matches += matchesMain + matchesExtra;
-
-                    console.log(`✓ Validated: ${matchesMain} main + ${matchesExtra} extra matches`);
+                if (!matchingDraw) {
+                    console.log(`No draw found for suggestion ${suggestion.draw_date}`);
+                    continue;
                 }
 
-                console.log('=== VALIDATION COMPLETED ===');
-                console.log('Validated:', validationResult.validated);
-                console.log('Total matches:', validationResult.total_matches);
+                const matchesMain = suggestion.main_numbers.filter(num => 
+                    matchingDraw.main_numbers.includes(num)
+                ).length;
 
-            } catch (validationError) {
-                console.error('Validation error:', validationError.message);
+                const matchesExtra = (suggestion.extra_numbers || []).filter(num => 
+                    (matchingDraw.extra_numbers || []).includes(num)
+                ).length;
+
+                await base44.asServiceRole.entities.Suggestion.update(suggestion.id, {
+                    actual_main_numbers: matchingDraw.main_numbers,
+                    actual_extra_numbers: matchingDraw.extra_numbers || [],
+                    matches_main: matchesMain,
+                    matches_extra: matchesExtra,
+                    was_validated: true
+                });
+
+                validationResult.validated++;
+                validationResult.total_matches += matchesMain + matchesExtra;
+
+                console.log(`✓ ${suggestion.draw_date}: ${matchesMain} main + ${matchesExtra} extra`);
             }
+
+            console.log('=== VALIDATION COMPLETED ===');
+            console.log('Validated:', validationResult.validated);
+            console.log('Total matches:', validationResult.total_matches);
+
+        } catch (validationError) {
+            console.error('Validation error:', validationError.message);
         }
 
         const message = totalSynced > 0 
