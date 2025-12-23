@@ -183,41 +183,51 @@ CRÍTICO: Retorna dados REAIS do site oficial. Não invente nenhum número.`;
                     : 'Base já atualizada'
             });
 
-            // Auto-validate suggestions
-            if (allNewDraws.length > 0) {
-                try {
-                    const suggestions = await base44.asServiceRole.entities.Suggestion.list();
-                    
-                    for (const draw of allNewDraws) {
-                        const toValidate = suggestions.filter(s => 
-                            s.lottery_id === lottery.id && 
-                            s.draw_date === draw.draw_date && 
-                            !s.was_validated
-                        );
+            // AUTO-VALIDATE SUGGESTIONS - Now checks ALL suggestions for this lottery
+            try {
+                console.log(`Checking suggestions for ${lottery.name}...`);
+                const allSuggestions = await base44.asServiceRole.entities.Suggestion.filter({
+                    lottery_id: lottery.id
+                });
 
-                        for (const sugg of toValidate) {
-                            const matchesMain = sugg.main_numbers.filter(n => 
-                                draw.main_numbers.includes(n)
-                            ).length;
+                console.log(`Found ${allSuggestions.length} suggestions for ${lottery.name}`);
 
-                            const matchesExtra = (sugg.extra_numbers || []).filter(n => 
-                                (draw.extra_numbers || []).includes(n)
-                            ).length;
+                // Get ALL draws for this lottery (not just new ones)
+                const allDrawsForLottery = await base44.asServiceRole.entities.Draw.filter({
+                    lottery_id: lottery.id
+                });
 
-                            await base44.asServiceRole.entities.Suggestion.update(sugg.id, {
-                                actual_main_numbers: draw.main_numbers,
-                                actual_extra_numbers: draw.extra_numbers,
-                                matches_main: matchesMain,
-                                matches_extra: matchesExtra,
-                                was_validated: true
-                            });
+                let validatedCount = 0;
 
-                            console.log(`✓ Validated: ${matchesMain} main + ${matchesExtra} extra`);
-                        }
+                for (const sugg of allSuggestions) {
+                    // Find matching draw by date
+                    const matchingDraw = allDrawsForLottery.find(d => d.draw_date === sugg.draw_date);
+
+                    if (matchingDraw && !sugg.was_validated) {
+                        const matchesMain = sugg.main_numbers.filter(n => 
+                            matchingDraw.main_numbers.includes(n)
+                        ).length;
+
+                        const matchesExtra = (sugg.extra_numbers || []).filter(n => 
+                            (matchingDraw.extra_numbers || []).includes(n)
+                        ).length;
+
+                        await base44.asServiceRole.entities.Suggestion.update(sugg.id, {
+                            actual_main_numbers: matchingDraw.main_numbers,
+                            actual_extra_numbers: matchingDraw.extra_numbers,
+                            matches_main: matchesMain,
+                            matches_extra: matchesExtra,
+                            was_validated: true
+                        });
+
+                        validatedCount++;
+                        console.log(`✓ Validated suggestion ${sugg.draw_date}: ${matchesMain} main + ${matchesExtra} extra`);
                     }
-                } catch (valError) {
-                    console.error('Validation error:', valError.message);
                 }
+
+                console.log(`Total validated: ${validatedCount} suggestions for ${lottery.name}`);
+            } catch (valError) {
+                console.error('Validation error:', valError.message);
             }
         }
 
