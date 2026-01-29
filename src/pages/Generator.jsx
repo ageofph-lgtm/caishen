@@ -79,14 +79,13 @@ export default function Generator() {
     }
   }, [lotteries, selectedLottery]);
 
-  // MACHINE LEARNING ADAPTATIVO - Ajuste inteligente de pesos
+  // MACHINE LEARNING ADAPTATIVO - Feedback Loop Agressivo
   React.useEffect(() => {
     if (validatedSuggestions.length >= 3) {
       console.log('🧠 Analyzing', validatedSuggestions.length, 'validated suggestions...');
 
-      // Calculate average performance
       const totalMatches = validatedSuggestions.reduce((sum, s) => sum + (s.matches_main || 0), 0);
-      const avgPerformance = totalMatches / validatedSuggestions.length;
+      const avgPerf = totalMatches / validatedSuggestions.length;
 
       // Analyze which numbers worked best
       const successfulNumbers = {};
@@ -106,23 +105,22 @@ export default function Generator() {
         .map(([num]) => parseInt(num));
 
       console.log('📊 Top successful numbers from AI:', topSuccessfulNumbers);
-      console.log('📈 Average matches:', avgPerformance.toFixed(2));
+      console.log('📈 Average performance:', avgPerf.toFixed(2));
 
-      // FEEDBACK LOOP: Ajusta estratégia baseado em resultados
+      // IA ADAPTATIVA: Ajusta pesos baseados na eficácia real
       setSettings(prev => ({
         ...prev,
         weights: {
-          // Se acertamos pouco, damos mais peso aos números que NÃO saíram (delay_cold)
-          delay_cold: avgPerformance < 1.0 ? prev.weights.delay_cold * 1.2 : prev.weights.delay_cold,
-          // Se acertamos muito, mantemos a estratégia de números frequentes (base_frequency)
-          base_frequency: avgPerformance > 1.5 ? prev.weights.base_frequency * 1.1 : prev.weights.base_frequency,
-          recency_hot: avgPerformance < 1.0 ? prev.weights.recency_hot * 0.9 : prev.weights.recency_hot * 1.05,
-          pair_affinity: prev.weights.pair_affinity,
-          even_odd_balance: prev.weights.even_odd_balance,
+          ...prev.weights,
+          // Se a performance é baixa (< 1 acerto), foca FORTE em números atrasados
+          delay_cold: avgPerf < 1.0 ? 2.5 : 1.8,
+          // Se a performance é alta (> 1.5), reforça números frequentes
+          base_frequency: avgPerf > 1.5 ? 1.5 : 1.0,
+          recency_hot: avgPerf < 1.0 ? 1.2 : 1.5,
         }
       }));
 
-      console.log('🧠 IA ajustou pesos para melhorar eficácia.');
+      console.log('🧠 Machine Learning: Pesos ajustados para otimizar resultados.');
     }
   }, [validatedSuggestions]);
 

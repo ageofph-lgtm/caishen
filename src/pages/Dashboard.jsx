@@ -71,12 +71,12 @@ export default function Dashboard() {
     }
   }, [lotteries, selectedLottery]);
 
-  const handleSync = async () => {
+  const handleSync = async (rebuild = false) => {
         setIsSyncing(true);
         setSyncMessage(null);
 
         try {
-          const response = await base44.functions.invoke('syncLotteryDraws');
+          const response = await base44.functions.invoke('syncSantaCasa', { rebuild });
 
           if (response.data.success) {
             setSyncMessage({
@@ -160,31 +160,23 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-blue-50">
-      {/* Top Bar with Logo */}
-      <div className="bg-white shadow-xl border-b border-indigo-100">
-        <div className="max-w-7xl mx-auto py-4 px-6 flex justify-center">
-          <img 
-            src="https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/68e7d9054f905ab0cb15db1c/c02da0b50_Gemini_Generated_Image_b05kdwb05kdwb05k.png" 
-            alt="Caishen Logo" 
-            className="h-20 w-auto"
-          />
-        </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto space-y-6 p-6">
-        {/* Header Redesenhado */}
-        <div className="flex flex-col md:flex-row justify-between items-center gap-6 bg-white p-6 rounded-3xl shadow-xl border border-indigo-50">
-          <div>
-            <h1 className="text-4xl font-black bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-purple-600">
-              CAISHEN AI
-            </h1>
-            <p className="text-gray-400 font-medium mt-1">Motor de Inteligência Preditiva</p>
+    <div className="min-h-screen bg-slate-50">
+      {/* NOVO HEADER DESIGN */}
+      <div className="bg-white border-b border-slate-200 p-6 shadow-sm">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+          <div className="flex items-center gap-4">
+             <div className="bg-indigo-600 p-3 rounded-2xl shadow-lg">
+               <Sparkles className="text-white w-6 h-6" />
+             </div>
+             <div>
+               <h1 className="text-2xl font-extrabold text-slate-900">CAISHEN INTELLIGENCE</h1>
+               <p className="text-sm text-slate-500 font-medium">Motor de Probabilidades Adaptativo</p>
+             </div>
           </div>
 
-          <div className="flex gap-3 w-full md:w-auto flex-wrap">
+          <div className="flex gap-3 flex-wrap">
             <Select value={selectedLottery || ''} onValueChange={setSelectedLottery}>
-              <SelectTrigger className="w-48 border-indigo-200">
+              <SelectTrigger className="w-48">
                 <SelectValue placeholder="Selecione a loteria" />
               </SelectTrigger>
               <SelectContent>
@@ -197,12 +189,13 @@ export default function Dashboard() {
             </Select>
 
             <Button
-              variant="ghost"
-              onClick={handleSync}
+              variant="outline"
+              onClick={() => handleSync(true)}
               disabled={isSyncing || isRepopulating}
-              className="text-indigo-600"
+              className="border-red-200 text-red-600 hover:bg-red-50"
             >
-              <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+              <Database className="w-4 h-4 mr-2" />
+              Reconstruir Base
             </Button>
 
             <Button
@@ -214,25 +207,26 @@ export default function Dashboard() {
             </Button>
 
             <Link to={createPageUrl('Generator')}>
-              <Button className="h-12 px-8 bg-gradient-to-r from-blue-600 to-indigo-700 hover:scale-105 transition-transform rounded-2xl shadow-lg">
+              <Button className="bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200">
                 <Sparkles className="mr-2 h-5 w-5" />
-                Gerar Previsão Certeira
+                Gerar Previsão IA
               </Button>
             </Link>
           </div>
           </div>
-
-          {/* Card de Status do Machine Learning */}
-          <Card className="bg-gradient-to-br from-indigo-900 to-purple-900 text-white p-6 border-none overflow-hidden relative">
-          <div className="relative z-10 flex justify-between items-center">
-             <div>
-               <p className="text-indigo-200 text-sm uppercase tracking-wider font-semibold">Status do Aprendizado</p>
-               <h2 className="text-3xl font-bold mt-1">{allDraws.length} Sorteios Analisados</h2>
-               <p className="text-indigo-300 text-sm mt-2">IA em modo autônomo • Performance crescente</p>
-             </div>
-             <Brain className="w-16 h-16 opacity-30" />
           </div>
-          <div className="absolute top-0 right-0 w-40 h-40 bg-white/10 rounded-full -mr-20 -mt-20 blur-3xl"></div>
+
+          <div className="max-w-7xl mx-auto p-6 space-y-6">
+          {/* INDICADOR DE SAÚDE DOS DADOS */}
+          <Card className="bg-gradient-to-r from-slate-900 to-indigo-900 text-white p-6 border-none">
+          <div className="flex justify-between items-center">
+            <div>
+              <p className="text-indigo-300 text-xs uppercase font-bold tracking-widest">Estado da Inteligência</p>
+              <h2 className="text-3xl font-bold mt-1">{allDraws.length} Sorteios no Cérebro</h2>
+              <p className="text-indigo-200/60 text-sm mt-2">Dados sincronizados e validados automaticamente via Santa Casa.</p>
+            </div>
+            <Brain className="w-16 h-16 text-white/20" />
+          </div>
           </Card>
 
         {/* Sync Message */}
