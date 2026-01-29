@@ -102,6 +102,29 @@ export default function Dashboard() {
         }
       };
 
+      const handleFullRebuild = async () => {
+        if (!window.confirm("Isto irá apagar todo o histórico atual e buscar dados novos na Santa Casa. Continuar?")) return;
+
+        setIsSyncing(true);
+        setSyncMessage({ type: 'info', text: '⏳ Limpando base de dados e minerando resultados oficiais...' });
+
+        try {
+          const response = await base44.functions.invoke('syncSantaCasa', { rebuild: true });
+
+          if (response.data.success) {
+            setSyncMessage({ type: 'success', text: '✓ Base de dados reconstruída com sucesso!' });
+            queryClient.invalidateQueries();
+          } else {
+            throw new Error(response.data.error);
+          }
+        } catch (error) {
+          setSyncMessage({ type: 'error', text: 'Erro na reconstrução: ' + error.message });
+        } finally {
+          setIsSyncing(false);
+          setTimeout(() => setSyncMessage(null), 8000);
+        }
+      };
+
       const handleRepopulate = async () => {
         setIsRepopulating(true);
         setSyncMessage({ type: 'info', text: '⏳ Recuperando dados históricos... Isso pode demorar alguns minutos.' });
@@ -190,7 +213,7 @@ export default function Dashboard() {
 
             <Button
               variant="outline"
-              onClick={() => handleSync(true)}
+              onClick={handleFullRebuild}
               disabled={isSyncing || isRepopulating}
               className="border-red-200 text-red-600 hover:bg-red-50"
             >

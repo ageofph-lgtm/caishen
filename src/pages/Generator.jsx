@@ -220,15 +220,25 @@ export default function Generator() {
         .map(([num, count]) => `${num}(${count}x)`));
 
       // PHASE 3: Create weighted pool with combined intelligence
+      const drawsCount = allDraws.length;
+      const isReliableHistory = drawsCount > 200;
+      const historyBonus = isReliableHistory ? 1.0 : 1.5;
+
       const weightedPool = [];
       const numberScores = {};
-      
+
       for (let i = currentLottery.main_min; i <= currentLottery.main_max; i++) {
         const freq = freqMap[i] || 0;
         const delay = delayMap[i] !== undefined ? delayMap[i] : allDraws.length;
         const aiRecommendations = aiRecommendedNumbers[i] || 0;
-        
+
         let weight = settings.weights.base_frequency * (freq + 1);
+
+        // Se o histórico for curto, a IA dá mais peso a números nunca sorteados (Cold Start)
+        if (!isReliableHistory && freq === 0) {
+          weight += 10;
+          console.log(`🔍 Histórico curto: Explorando número ${i}`);
+        }
         
         // LEARNING: Major boost for numbers that worked in AI suggestions
         if (successfulNumbers.has(i)) {
