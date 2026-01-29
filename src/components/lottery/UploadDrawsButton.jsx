@@ -12,10 +12,10 @@ export default function UploadDrawsButton({ lotteryId, lotteryName }) {
   const queryClient = useQueryClient();
 
   const importMutation = useMutation({
-    mutationFn: async (fileUrl) => {
+    mutationFn: async ({ fileContent, fileName }) => {
       const response = await base44.functions.invoke('importDrawsFromFile', {
-        lottery_id: lotteryId,
-        file_url: fileUrl
+        fileContent,
+        fileName
       });
       return response.data;
     },
@@ -85,20 +85,25 @@ export default function UploadDrawsButton({ lotteryId, lotteryName }) {
     setStatus(null);
 
     try {
-      console.log('Uploading file...');
-      
-      const uploadResult = await base44.integrations.Core.UploadFile({ file });
-      console.log('Upload result:', uploadResult);
-      
-      if (!uploadResult || !uploadResult.file_url) {
-        throw new Error('URL do ficheiro não foi retornado');
-      }
+        console.log('Uploading file...');
 
-      console.log('File uploaded:', uploadResult.file_url);
-      
-      await importMutation.mutateAsync(uploadResult.file_url);
-      
-    } catch (error) {
+        const uploadResult = await base44.integrations.Core.UploadFile({ file });
+        console.log('Upload result:', uploadResult);
+
+        if (!uploadResult || !uploadResult.file_url) {
+          throw new Error('URL do ficheiro não foi retornado');
+        }
+
+        console.log('File uploaded:', uploadResult.file_url);
+
+        // Lê o conteúdo do ficheiro
+        const fileContentResponse = await fetch(uploadResult.file_url);
+        const fileContent = await fileContentResponse.text();
+
+        // Invoca a função com fileContent e fileName
+        await importMutation.mutateAsync({ fileContent, fileName: file.name });
+
+      } catch (error) {
       console.error('Upload error:', error);
       setStatus({ 
         type: 'error', 

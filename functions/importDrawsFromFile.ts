@@ -1,20 +1,23 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.4';
 
-// Função auxiliar para converter datas DD/MM/YYYY para YYYY-MM-DD
-function formatDate(dateStr: string): string | null {
+// Função auxiliar para validar e converter datas
+function parseDate(dateStr: string): string | null {
     if (!dateStr) return null;
-    // Se já estiver em YYYY-MM-DD
-    if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) return dateStr;
+    const cleanStr = dateStr.trim();
     
-    // Tenta DD/MM/YYYY
-    const parts = dateStr.split('/');
+    // Formato YYYY-MM-DD (Padrão do ficheiro Lotoideas EuroDreams)
+    if (cleanStr.match(/^\d{4}-\d{2}-\d{2}$/)) return cleanStr;
+    
+    // Formato DD/MM/YYYY (Caso apareça noutros ficheiros)
+    const parts = cleanStr.split('/');
     if (parts.length === 3) {
         return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
     }
+    
     return null;
 }
 
-// Função para limpar números (remove espaços e zeros à esquerda desnecessários)
+// Limpa arrays de números, removendo vazios e ordenando
 function cleanNumbers(nums: any[]): number[] {
     return nums
         .map(n => parseInt(String(n).trim()))
@@ -25,154 +28,100 @@ function cleanNumbers(nums: any[]): number[] {
 Deno.serve(async (req) => {
     try {
         const base44 = createClientFromRequest(req);
-        const { lottery_id, file_url } = await req.json();
+        const { fileContent, fileName } = await req.json();
 
-        if (!lottery_id || !file_url) {
-            throw new Error("Parâmetros obrigatórios: lottery_id e file_url");
+        if (!fileContent) throw new Error("Conteúdo do arquivo vazio.");
+
+        console.log(`A processar ficheiro: ${fileName}`);
+        
+        // Identificação exclusiva para EuroDreams (como solicitado)
+        let lotteryName = "";
+        if (fileName.toLowerCase().includes("eurodreams")) {
+            lotteryName = "EuroDreams";
+        } else {
+            // Mantém suporte básico a outros se necessário, ou lança erro
+             if (fileName.toLowerCase().includes("euromillones") || fileName.toLowerCase().includes("euromilhoes")) lotteryName = "EuroMilhões";
+             else if (fileName.toLowerCase().includes("toto")) lotteryName = "Totoloto";
         }
 
-        console.log(`Baixando ficheiro: ${file_url}`);
-        
-        // Busca o ficheiro pela URL
-        const fileResponse = await fetch(file_url);
-        if (!fileResponse.ok) {
-            throw new Error("Erro ao baixar o ficheiro");
-        }
-        
-        const fileContent = await fileResponse.text();
-        const fileName = file_url.split('/').pop() || 'file.csv';
-        
-        console.log(`Processando ficheiro: ${fileName}`);
+        if (!lotteryName) throw new Error("Lotaria não identificada. Este script foi otimizado para EuroDreams.");
 
-        // Busca informações da lotaria
-        const lottery = await base44.asServiceRole.entities.Lottery.get(lottery_id);
-        if (!lottery) {
-            throw new Error("Lotaria não encontrada");
-        }
-        
-        const lotteryName = lottery.name;
+        // Busca o ID da lotaria
+        const lotteries = await base44.asServiceRole.entities.Lottery.filter({ name: lotteryName });
+        if (lotteries.length === 0) throw new Error(`Lotaria '${lotteryName}' não encontrada no sistema.`);
+        const lotteryId = lotteries[0].id;
 
-        // Processa as linhas do CSV ou PDF extraído
         const lines = fileContent.split('\n');
         const drawsToSave = [];
         let skipped = 0;
-        
-        // Detecta se é PDF extraído (números separados por espaços) ou CSV normal
-        const isPdfFormat = fileName.toLowerCase().includes('.pdf') || 
-                           (lines[1] && lines[1].split(' ').filter(x => x.trim()).length > 10);
-        
-        console.log(`Formato detectado: ${isPdfFormat ? 'PDF (espaços)' : 'CSV'}`);
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
-            if (!line || i === 0 || line.includes('FECHA') || line.includes('COMB.')) continue;
+            if (!line) continue;
 
-            let cols: string[] = [];
-            
-            if (isPdfFormat && lotteryName === "EuroDreams") {
-                // Formato PDF: "2 6 / 0 1 / 2 0 2 6 1 5 2 3 2 8 3 3 3 4 3 7 3"
-                // Reconstruir data e números
-                const parts = line.split(/\s+/).filter(x => x.trim());
-                
-                // Tentar reconstruir a data (primeiros elementos até encontrar padrão DD/MM/YYYY)
-                let dateStr = '';
-                let idx = 0;
-                
-                // Buscar padrão: D D / M M / Y Y Y Y
-                if (parts.length >= 10) {
-                    // Pode ser: "26/01/2026..." ou "2 6 / 0 1 / 2 0 2 6 ..."
-                    if (parts[0].includes('/')) {
-                        dateStr = parts[0];
-                        idx = 1;
-                    } else {
-                        // Reconstruir: partes[0]+partes[1] / partes[3]+partes[4] / partes[6...9]
-                        dateStr = parts[0] + parts[1] + '/' + parts[3] + parts[4] + '/' + 
-                                  parts[6] + parts[7] + parts[8] + parts[9];
-                        idx = 10;
-                    }
-                    
-                    // Números principais: próximos 6 números (12 dígitos se separados)
-                    const remainingParts = parts.slice(idx);
-                    const numbers = remainingParts.filter(p => /^\d+$/.test(p));
-                    
-                    // Juntar pares de dígitos se necessário
-                    if (numbers.length > 7) {
-                        const mainNums = [];
-                        for (let j = 0; j < 12; j += 2) {
-                            if (numbers[j] && numbers[j+1]) {
-                                mainNums.push(numbers[j] + numbers[j+1]);
-                            }
-                        }
-                        const extra = numbers[12] ? (numbers[13] ? numbers[12] + numbers[13] : numbers[12]) : '';
-                        cols = [dateStr, '', ...mainNums, extra];
-                    } else {
-                        // Números já estão agrupados
-                        cols = [dateStr, '', ...numbers];
-                    }
-                }
-            } else {
-                // Formato CSV normal
-                const separator = fileContent.includes(';') ? ';' : ',';
-                const cleanLine = line.replace(/"/g, '').replace(/\t/g, separator);
-                cols = cleanLine.split(separator).map(c => c.trim());
+            // Remove aspas que o CSV possa ter
+            const cleanLine = line.replace(/"/g, ''); 
+            const cols = cleanLine.split(',').map(c => c.trim());
+
+            // 1. Tenta encontrar uma data válida na primeira coluna
+            // Isto filtra automaticamente cabeçalhos como "FECHA,COMB..." ou "www.lotoideas..."
+            const drawDate = parseDate(cols[0]);
+
+            if (!drawDate) {
+                skipped++;
+                continue; // Se não começa com data, é lixo ou cabeçalho
             }
 
-            let drawDate = null;
             let mainNumbers: number[] = [];
             let extraNumbers: number[] = [];
 
             try {
-                // LÓGICA DE PARSING ADAPTATIVA
-                
-                // CASO 1: EuroMilhões (Lotoideas CSV)
-                // Formato: DATA, N1, N2, N3, N4, N5, (vazio), E1, E2
-                if (lotteryName === "EuroMilhões") {
-                    drawDate = formatDate(cols[0]);
-                    mainNumbers = cleanNumbers(cols.slice(1, 6));
+                // LÓGICA ESPECÍFICA EURODREAMS
+                // Formato Lotoideas: DATA(0), N1(1), N2(2), N3(3), N4(4), N5(5), N6(6), Sueño(7)
+                if (lotteryName === "EuroDreams") {
+                    // Pega exatamente 6 números principais (colunas 1 a 6)
+                    mainNumbers = cleanNumbers(cols.slice(1, 7));
+                    
+                    // Pega o número "Sueño" (coluna 7)
+                    if (cols[7]) {
+                        extraNumbers = cleanNumbers([cols[7]]);
+                    }
+                } 
+                // Lógica de fallback para outras lotarias (se o ficheiro for outro)
+                else if (lotteryName === "EuroMilhões") {
+                    mainNumbers = cleanNumbers(cols.slice(1, 6)); // 5 números
                     const startExtra = cols[6] === '' ? 7 : 6;
                     extraNumbers = cleanNumbers(cols.slice(startExtra, startExtra + 2));
-                } 
-                
-                // CASO 2: Totoloto (toto..csv)
-                // Formato: DATA, N1, N2, N3, N4, N5, NS
+                }
                 else if (lotteryName === "Totoloto") {
-                    drawDate = formatDate(cols[0]);
-                    mainNumbers = cleanNumbers(cols.slice(1, 6));
+                    mainNumbers = cleanNumbers(cols.slice(1, 6)); // 5 números
                     if (cols[6]) extraNumbers = cleanNumbers([cols[6]]);
                 }
 
-                // CASO 3: EuroDreams (Lotoideas XLSX/CSV)
-                // Formato: FECHA, COMB. GANADORA (ignorar), N1, N2, N3, N4, N5, N6, SUEÑO
-                else if (lotteryName === "EuroDreams") {
-                    drawDate = formatDate(cols[0]);
-                    // Pula a coluna 1 (COMB. GANADORA) e pega os 6 números das colunas 2-7
-                    mainNumbers = cleanNumbers(cols.slice(2, 8));
-                    // SUEÑO está na coluna 8
-                    if (cols[8]) extraNumbers = cleanNumbers([cols[8]]);
-                    
-                    console.log(`Linha ${i}: data=${drawDate}, nums=${mainNumbers.length}, extras=${extraNumbers.length}`);
+                // Validação final de consistência
+                // EuroDreams deve ter 6 principais e 1 extra
+                if (lotteryName === "EuroDreams" && (mainNumbers.length !== 6 || extraNumbers.length !== 1)) {
+                    console.warn(`Linha ${i} ignorada: contagem incorreta de números EuroDreams (${mainNumbers.length}+${extraNumbers.length})`);
+                    skipped++;
+                    continue;
                 }
 
-                // Validação Final da Linha (EuroDreams precisa de 6 números)
-                const minNumbers = lotteryName === "EuroDreams" ? 6 : 5;
-                if (drawDate && mainNumbers.length >= minNumbers) {
+                if (mainNumbers.length > 0) {
                     drawsToSave.push({
-                        lottery_id: lottery_id,
+                        lottery_id: lotteryId,
                         draw_date: drawDate,
                         main_numbers: mainNumbers,
                         extra_numbers: extraNumbers
                     });
-                } else {
-                    skipped++;
                 }
 
             } catch (e) {
-                console.warn(`Erro na linha ${i}:`, e.message);
+                console.warn(`Erro de processamento na linha ${i}:`, e.message);
                 skipped++;
             }
         }
 
-        // SALVA EM BLOCOS (Batch)
+        // Salva em blocos (Batch) para eficiência
         if (drawsToSave.length > 0) {
             const batchSize = 50;
             for (let i = 0; i < drawsToSave.length; i += batchSize) {
@@ -180,21 +129,16 @@ Deno.serve(async (req) => {
             }
         }
 
-        // RE-VALIDAÇÃO AUTOMÁTICA
-        try {
-            await base44.functions.invoke('validateSuggestions');
-        } catch (valError) {
-            console.warn('Erro na validação (não crítico):', valError.message);
-        }
+        // Validação automática após importar
+        await base44.functions.invoke('validateSuggestions');
 
         return Response.json({ 
             success: true, 
-            imported: drawsToSave.length,
-            message: `Importados ${drawsToSave.length} sorteios para ${lotteryName}. (Ignorados: ${skipped})` 
+            message: `Processado com sucesso! Importados ${drawsToSave.length} sorteios para ${lotteryName}. (Linhas ignoradas/cabeçalhos: ${skipped})` 
         });
 
     } catch (error) {
-        console.error('Erro na importação:', error);
+        console.error(error);
         return Response.json({ success: false, error: error.message }, { status: 500 });
     }
 });
