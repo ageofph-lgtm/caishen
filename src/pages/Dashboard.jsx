@@ -4,7 +4,7 @@ import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Sparkles, TrendingUp, BarChart3, Clock, Info, Database, Upload, RefreshCw, AlertCircle, Check, Award } from 'lucide-react';
+import { Sparkles, TrendingUp, BarChart3, Clock, Info, Database, Upload, RefreshCw, AlertCircle, Check, Award, Brain } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { Alert, AlertDescription } from '@/components/ui/alert';
