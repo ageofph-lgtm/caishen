@@ -90,11 +90,13 @@ Deno.serve(async (req) => {
                 }
 
                 // CASO 3: EuroDreams (Lotoideas XLSX/CSV)
-                // Formato: DATA, N1, N2, N3, N4, N5, N6, Sueño
+                // Formato: FECHA, COMB. GANADORA (ignorar), N1, N2, N3, N4, N5, N6, SUEÑO
                 else if (lotteryName === "EuroDreams") {
                     drawDate = formatDate(cols[0]);
-                    mainNumbers = cleanNumbers(cols.slice(1, 7));
-                    if (cols[7]) extraNumbers = cleanNumbers([cols[7]]);
+                    // Pula a coluna 1 (COMB. GANADORA) e pega os 6 números das colunas 2-7
+                    mainNumbers = cleanNumbers(cols.slice(2, 8));
+                    // SUEÑO está na coluna 8
+                    if (cols[8]) extraNumbers = cleanNumbers([cols[8]]);
                 }
 
                 // Validação Final da Linha
