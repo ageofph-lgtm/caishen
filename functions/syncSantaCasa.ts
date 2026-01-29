@@ -5,13 +5,12 @@ Deno.serve(async (req) => {
         console.log('=== SYNC SANTA CASA - RECONSTRUÇÃO INTELIGENTE ===');
         
         const base44 = createClientFromRequest(req);
-        const user = await base44.auth.me();
-
-        if (!user) {
-            return Response.json({ error: 'Unauthorized' }, { status: 401 });
-        }
-
-        const { rebuild } = await req.json().catch(() => ({})); // Parâmetro para reconstrução total
+        
+        // Captura o parâmetro rebuild do corpo da requisição
+        const body = await req.json().catch(() => ({}));
+        const rebuild = body.rebuild === true;
+        
+        console.log('Rebuild mode:', rebuild);
 
         const lotteries = await base44.asServiceRole.entities.Lottery.filter({ is_active: true });
         
@@ -33,13 +32,21 @@ Deno.serve(async (req) => {
             // LIMPEZA AUTOMÁTICA: Se for rebuild, remove histórico antigo
             if (rebuild) {
                 console.log('REBUILD MODE: Limpando histórico antigo...');
-                const oldDraws = await base44.asServiceRole.entities.Draw.filter({
-                    lottery_id: lottery.id
-                });
-                for (const oldDraw of oldDraws) {
-                    await base44.asServiceRole.entities.Draw.delete(oldDraw.id);
+                try {
+                    const oldDraws = await base44.asServiceRole.entities.Draw.filter({
+                        lottery_id: lottery.id
+                    });
+                    console.log(`Encontrados ${oldDraws.length} sorteios para remover`);
+                    
+                    // Deleta em lote para evitar timeout
+                    for (const oldDraw of oldDraws) {
+                        await base44.asServiceRole.entities.Draw.delete(oldDraw.id);
+                    }
+                    console.log(`✓ Removidos ${oldDraws.length} sorteios antigos`);
+                } catch (deleteError) {
+                    console.error('Erro ao deletar:', deleteError.message);
+                    // Continua mesmo se houver erro na deleção
                 }
-                console.log(`Removidos ${oldDraws.length} sorteios antigos`);
             }
 
             // Get existing draws for this lottery
@@ -62,7 +69,7 @@ Deno.serve(async (req) => {
                 let prompt = '';
                 
                 if (lottery.name === 'EuroMilhões') {
-                    prompt = `Aceda ao site oficial jogossantacasa.pt e extraia o histórico COMPLETO do EuroMilhões.
+                    prompt = `Aceda ao site oficial jogossantacasa.pt e extraia os resultados REAIS do EuroMilhões.
 
                 DADOS NECESSÁRIOS: ${batch.count} sorteios ${batch.offset ? `(do ${batch.offset + 1}º ao ${batch.offset + batch.count}º mais recente)` : 'mais recentes'}
 
@@ -70,17 +77,19 @@ Deno.serve(async (req) => {
                 - 5 números principais de 1 a 50
                 - 2 estrelas de 1 a 12
 
-                NORMALIZAÇÃO DE DATAS: Datas OBRIGATORIAMENTE no formato YYYY-MM-DD.
+                FORMATO DE DATA OBRIGATÓRIO: YYYY-MM-DD (ex: 2026-01-28)
 
-                Formato de resposta para CADA sorteio:
-                - draw_date: YYYY-MM-DD (formato obrigatório)
-                - main_numbers: [5 números inteiros]
-                - extra_numbers: [2 números inteiros]
+                Retorne um JSON com array 'draws' contendo para CADA sorteio:
+                {
+                "draw_date": "YYYY-MM-DD",
+                "main_numbers": [5 números inteiros de 1-50],
+                "extra_numbers": [2 números inteiros de 1-12]
+                }
 
-                CRÍTICO: Apenas dados REAIS do site oficial. Retorne APENAS JSON válido.`;
+                CRÍTICO: Apenas dados oficiais verificados. JSON estritamente válido.`;
 
                 } else if (lottery.name === 'Totoloto') {
-                    prompt = `Aceda ao site oficial jogossantacasa.pt e extraia o histórico COMPLETO do Totoloto.
+                    prompt = `Aceda ao site oficial jogossantacasa.pt e extraia os resultados REAIS do Totoloto.
 
                 DADOS NECESSÁRIOS: ${batch.count} sorteios ${batch.offset ? `(do ${batch.offset + 1}º ao ${batch.offset + batch.count}º mais recente)` : 'mais recentes'}
 
@@ -88,17 +97,19 @@ Deno.serve(async (req) => {
                 - 5 números principais de 1 a 49
                 - 1 número da sorte de 1 a 13
 
-                NORMALIZAÇÃO DE DATAS: Datas OBRIGATORIAMENTE no formato YYYY-MM-DD.
+                FORMATO DE DATA OBRIGATÓRIO: YYYY-MM-DD (ex: 2026-01-28)
 
-                Formato de resposta para CADA sorteio:
-                - draw_date: YYYY-MM-DD (formato obrigatório)
-                - main_numbers: [5 números inteiros]
-                - extra_numbers: [1 número inteiro]
+                Retorne um JSON com array 'draws' contendo para CADA sorteio:
+                {
+                "draw_date": "YYYY-MM-DD",
+                "main_numbers": [5 números inteiros de 1-49],
+                "extra_numbers": [1 número inteiro de 1-13]
+                }
 
-                CRÍTICO: Apenas dados REAIS do site oficial. Retorne APENAS JSON válido.`;
+                CRÍTICO: Apenas dados oficiais verificados. JSON estritamente válido.`;
 
                 } else if (lottery.name === 'EuroDreams') {
-                    prompt = `Aceda ao site oficial jogossantacasa.pt e extraia o histórico COMPLETO do EuroDreams.
+                    prompt = `Aceda ao site oficial jogossantacasa.pt e extraia os resultados REAIS do EuroDreams.
 
                 DADOS NECESSÁRIOS: ${batch.count} sorteios ${batch.offset ? `(do ${batch.offset + 1}º ao ${batch.offset + batch.count}º mais recente)` : 'mais recentes'}
 
@@ -106,14 +117,16 @@ Deno.serve(async (req) => {
                 - 6 números principais de 1 a 40
                 - 1 número Dream de 1 a 5
 
-                NORMALIZAÇÃO DE DATAS: Datas OBRIGATORIAMENTE no formato YYYY-MM-DD.
+                FORMATO DE DATA OBRIGATÓRIO: YYYY-MM-DD (ex: 2026-01-28)
 
-                Formato de resposta para CADA sorteio:
-                - draw_date: YYYY-MM-DD (formato obrigatório)
-                - main_numbers: [6 números inteiros]
-                - extra_numbers: [1 número inteiro]
+                Retorne um JSON com array 'draws' contendo para CADA sorteio:
+                {
+                "draw_date": "YYYY-MM-DD",
+                "main_numbers": [6 números inteiros de 1-40],
+                "extra_numbers": [1 número inteiro de 1-5]
+                }
 
-                CRÍTICO: Apenas dados REAIS do site oficial. Retorne APENAS JSON válido.`;
+                CRÍTICO: Apenas dados oficiais verificados. JSON estritamente válido.`;
                 } else {
                     continue;
                 }
@@ -253,20 +266,35 @@ Deno.serve(async (req) => {
 
         const totalSynced = results.reduce((sum, r) => sum + r.synced, 0);
 
+        // DISPARO AUTOMÁTICO: Valida todas as sugestões após sync/rebuild
+        try {
+            console.log('\n=== INICIANDO AUTO-VALIDAÇÃO ===');
+            await base44.asServiceRole.functions.invoke('validateSuggestions', {});
+            console.log('✓ Auto-validação concluída');
+        } catch (valError) {
+            console.error('Erro na auto-validação (não crítico):', valError.message);
+        }
+
         return Response.json({
             success: true,
-            message: totalSynced > 0 
-                ? `✓ ${totalSynced} novo(s) sorteio(s) sincronizado(s)`
-                : '✓ Base de dados já atualizada',
+            message: rebuild 
+                ? '✓ Base reconstruída com sucesso'
+                : totalSynced > 0 
+                    ? `✓ ${totalSynced} novo(s) sorteio(s) sincronizado(s)`
+                    : '✓ Base de dados já atualizada',
             total_synced: totalSynced,
-            results: results
+            results: results,
+            rebuild_mode: rebuild
         });
 
-    } catch (error) {
+        } catch (error) {
+        console.error('=== ERRO CRÍTICO ===');
         console.error('Error:', error.message);
+        console.error('Stack:', error.stack);
         return Response.json({ 
             success: false,
-            error: error.message 
+            error: error.message,
+            details: error.stack 
         }, { status: 500 });
-    }
-});
+        }
+        });

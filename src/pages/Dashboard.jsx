@@ -106,22 +106,33 @@ export default function Dashboard() {
         if (!window.confirm("Isto irá apagar todo o histórico atual e buscar dados novos na Santa Casa. Continuar?")) return;
 
         setIsSyncing(true);
-        setSyncMessage({ type: 'info', text: '⏳ Limpando base de dados e minerando resultados oficiais...' });
+        setSyncMessage({ type: 'info', text: '⏳ Limpando base de dados e minerando resultados oficiais... Aguarde.' });
 
         try {
+          console.log('Iniciando reconstrução...');
           const response = await base44.functions.invoke('syncSantaCasa', { rebuild: true });
+          console.log('Resposta recebida:', response.data);
 
-          if (response.data.success) {
-            setSyncMessage({ type: 'success', text: '✓ Base de dados reconstruída com sucesso!' });
+          if (response.data?.success) {
+            setSyncMessage({ 
+              type: 'success', 
+              text: `✓ ${response.data.message || 'Base reconstruída com sucesso!'}`
+            });
+            // Invalida todas as queries para forçar reload
             queryClient.invalidateQueries();
           } else {
-            throw new Error(response.data.error);
+            const errorMsg = response.data?.error || response.data?.message || 'Erro desconhecido';
+            throw new Error(errorMsg);
           }
         } catch (error) {
-          setSyncMessage({ type: 'error', text: 'Erro na reconstrução: ' + error.message });
+          console.error('Erro na reconstrução:', error);
+          setSyncMessage({ 
+            type: 'error', 
+            text: 'Erro na reconstrução: ' + (error.message || 'Falha na comunicação com o servidor')
+          });
         } finally {
           setIsSyncing(false);
-          setTimeout(() => setSyncMessage(null), 8000);
+          setTimeout(() => setSyncMessage(null), 10000);
         }
       };
 
