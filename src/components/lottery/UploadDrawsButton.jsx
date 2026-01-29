@@ -96,9 +96,50 @@ export default function UploadDrawsButton({ lotteryId, lotteryName }) {
 
         console.log('File uploaded:', uploadResult.file_url);
 
-        // Lê o conteúdo do ficheiro
-        const fileContentResponse = await fetch(uploadResult.file_url);
-        const fileContent = await fileContentResponse.text();
+        let fileContent = '';
+
+        // Se for PDF, extrai com a integração Core
+        if (file.name.toLowerCase().endsWith('.pdf')) {
+          console.log('PDF detected, extracting text...');
+
+          // Extrai dados estruturados do PDF
+          const extractResult = await base44.integrations.Core.ExtractDataFromUploadedFile({
+            file_url: uploadResult.file_url,
+            json_schema: {
+              type: "object",
+              properties: {
+                draws: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      date: { type: "string" },
+                      numbers: { type: "array", items: { type: "number" } },
+                      extra: { type: "number" }
+                    }
+                  }
+                }
+              }
+            }
+          });
+
+          if (extractResult.status === 'success' && extractResult.output?.draws) {
+            // Converte para formato CSV
+            const csvLines = ['DATA,N1,N2,N3,N4,N5,N6,SUENO'];
+            extractResult.output.draws.forEach(draw => {
+              const nums = draw.numbers.slice(0, 6).join(',');
+              csvLines.push(`${draw.date},${nums},${draw.extra}`);
+            });
+            fileContent = csvLines.join('\n');
+            console.log('Extracted draws:', extractResult.output.draws.length);
+          } else {
+            throw new Error('Falha ao extrair dados do PDF');
+          }
+        } else {
+          // Para CSV/Excel, lê diretamente
+          const fileContentResponse = await fetch(uploadResult.file_url);
+          fileContent = await fileContentResponse.text();
+        }
 
         // Invoca a função com fileContent e fileName
         await importMutation.mutateAsync({ fileContent, fileName: file.name });
