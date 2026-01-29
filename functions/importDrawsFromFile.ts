@@ -1,285 +1,138 @@
-import { createClientFromRequest } from 'npm:@base44/sdk@0.7.1';
-import * as XLSX from 'npm:xlsx@0.18.5';
+import { createClientFromRequest } from 'npm:@base44/sdk@0.8.4';
+
+// Função auxiliar para converter datas DD/MM/YYYY para YYYY-MM-DD
+function formatDate(dateStr: string): string | null {
+    if (!dateStr) return null;
+    // Se já estiver em YYYY-MM-DD
+    if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) return dateStr;
+    
+    // Tenta DD/MM/YYYY
+    const parts = dateStr.split('/');
+    if (parts.length === 3) {
+        return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+    }
+    return null;
+}
+
+// Função para limpar números (remove espaços e zeros à esquerda desnecessários)
+function cleanNumbers(nums: any[]): number[] {
+    return nums
+        .map(n => parseInt(String(n).trim()))
+        .filter(n => !isNaN(n))
+        .sort((a, b) => a - b); // Ordena sempre para evitar confusão
+}
 
 Deno.serve(async (req) => {
     try {
-        console.log('=== IMPORT STARTED ===');
-        
         const base44 = createClientFromRequest(req);
-        const user = await base44.auth.me();
+        const { fileContent, fileName } = await req.json();
 
-        if (!user) {
-            return Response.json({ 
-                success: false,
-                error: 'Não autorizado' 
-            }, { status: 401 });
-        }
+        if (!fileContent) throw new Error("Conteúdo do arquivo vazio.");
 
-        const body = await req.json();
-        const { lottery_id, file_url } = body;
-
-        if (!lottery_id || !file_url) {
-            return Response.json({ 
-                success: false,
-                error: 'lottery_id e file_url são obrigatórios' 
-            }, { status: 400 });
-        }
-
-        console.log('Importing for lottery:', lottery_id);
-
-        // Get lottery
-        const allLotteries = await base44.asServiceRole.entities.Lottery.list();
-        const lottery = allLotteries.find(l => l.id === lottery_id);
+        console.log(`A processar ficheiro: ${fileName}`);
         
-        if (!lottery) {
-            return Response.json({ 
-                success: false,
-                error: 'Loteria não encontrada' 
-            }, { status: 404 });
-        }
+        // Deteta a lotaria pelo nome do ficheiro ou cabeçalho
+        let lotteryName = "";
+        if (fileName.toLowerCase().includes("eurodreams")) lotteryName = "EuroDreams";
+        else if (fileName.toLowerCase().includes("euromillones") || fileName.toLowerCase().includes("euromilhoes")) lotteryName = "EuroMilhões";
+        else if (fileName.toLowerCase().includes("toto")) lotteryName = "Totoloto";
+        else throw new Error("Não foi possível identificar a lotaria pelo nome do ficheiro.");
 
-        console.log('Lottery:', lottery.name);
+        // Busca o ID da lotaria
+        const lotteries = await base44.asServiceRole.entities.Lottery.filter({ name: lotteryName });
+        if (lotteries.length === 0) throw new Error(`Lotaria '${lotteryName}' não encontrada no sistema.`);
+        const lotteryId = lotteries[0].id;
 
-        // Download file
-        const fileResponse = await fetch(file_url);
-        if (!fileResponse.ok) {
-            return Response.json({ 
-                success: false,
-                error: 'Erro ao baixar ficheiro' 
-            }, { status: 500 });
-        }
+        // Processa as linhas do CSV
+        const lines = fileContent.split('\n');
+        const drawsToSave = [];
+        let skipped = 0;
 
-        const arrayBuffer = await fileResponse.arrayBuffer();
-        console.log('File downloaded, size:', arrayBuffer.byteLength);
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line || i === 0) continue; // Pula cabeçalho e linhas vazias (Assumindo cabeçalho na linha 1)
 
-        let extractedDraws = [];
+            // Remove aspas extras que o CSV possa ter
+            const cleanLine = line.replace(/"/g, ''); 
+            const cols = cleanLine.split(',').map(c => c.trim());
 
-        // Parse Excel/CSV
-        try {
-            if (file_url.toLowerCase().endsWith('.csv')) {
-                // CSV
-                const text = new TextDecoder().decode(arrayBuffer);
-                const lines = text.split('\n').filter(line => line.trim());
+            let drawDate = null;
+            let mainNumbers: number[] = [];
+            let extraNumbers: number[] = [];
+
+            try {
+                // LÓGICA DE PARSING ADAPTATIVA
                 
-                extractedDraws = lines.slice(1).map(line => {
-                    const parts = line.split(/[,;]/).map(p => p.trim());
-                    
-                    // First column: main numbers (can be comma-separated string or individual)
-                    let mainNumbers = [];
-                    if (parts[0] && parts[0].includes(',')) {
-                        mainNumbers = parts[0].split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
-                    } else {
-                        for (let i = 0; i < lottery.main_count && i < parts.length; i++) {
-                            const num = parseInt(parts[i]);
-                            if (!isNaN(num)) mainNumbers.push(num);
-                        }
-                    }
-                    
-                    // Extra numbers
-                    let extraNumbers = [];
-                    const extraIdx = mainNumbers.length === lottery.main_count ? lottery.main_count : 1;
-                    const extraStr = parts[extraIdx];
-                    if (extraStr) {
-                        const nums = extraStr.split(/[\s,]+/).map(n => parseInt(n.trim())).filter(n => !isNaN(n));
-                        extraNumbers = nums.slice(0, lottery.extra_count);
-                    }
-                    
-                    // Date from last column
-                    const dateStr = parts[parts.length - 1];
-                    
-                    return { mainNumbers, extraNumbers, dateStr };
-                });
-            } else {
-                // Excel
-                const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-                const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-                const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                // CASO 1: EuroMilhões (Lotoideas CSV)
+                // Formato: DATA, N1, N2, N3, N4, N5, (vazio), E1, E2
+                if (lotteryName === "EuroMilhões") {
+                    drawDate = formatDate(cols[0]);
+                    // Números principais (índices 1 a 5)
+                    mainNumbers = cleanNumbers(cols.slice(1, 6));
+                    // Estrelas (índices 7 a 8 - pula o 6 que costuma ser vazio no lotoideas)
+                    // Se a coluna 6 tiver dados, usamos ela, senão pulamos
+                    const startExtra = cols[6] === '' ? 7 : 6;
+                    extraNumbers = cleanNumbers(cols.slice(startExtra, startExtra + 2));
+                } 
                 
-                extractedDraws = data.slice(1).map(row => {
-                    if (!row || row.length < 2) return null;
-                    
-                    // Parse main numbers
-                    let mainNumbers = [];
-                    const firstCol = row[0];
-                    
-                    if (typeof firstCol === 'string' && firstCol.includes(',')) {
-                        // Format: "1, 2, 3, 4, 5"
-                        mainNumbers = firstCol.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
-                    } else if (typeof firstCol === 'string' && firstCol.includes(' ')) {
-                        // Format: "1 2 3 4 5"
-                        mainNumbers = firstCol.split(/\s+/).map(n => parseInt(n.trim())).filter(n => !isNaN(n));
-                    } else {
-                        // Separate columns
-                        for (let i = 0; i < lottery.main_count && i < row.length; i++) {
-                            const num = parseInt(row[i]);
-                            if (!isNaN(num)) mainNumbers.push(num);
-                        }
-                    }
-                    
-                    // Parse extra numbers (second-to-last column usually)
-                    let extraNumbers = [];
-                    const extraCol = row[row.length - 2];
-                    
-                    if (extraCol !== undefined && extraCol !== null && extraCol !== '') {
-                        if (typeof extraCol === 'string') {
-                            const nums = extraCol.split(/[\s,]+/).map(n => parseInt(n.trim())).filter(n => !isNaN(n));
-                            extraNumbers = nums.slice(0, lottery.extra_count);
-                        } else {
-                            const num = parseInt(extraCol);
-                            if (!isNaN(num)) extraNumbers.push(num);
-                        }
-                    }
-                    
-                    // Date from last column
-                    const dateStr = row[row.length - 1];
-                    
-                    return { mainNumbers, extraNumbers, dateStr };
-                }).filter(r => r !== null);
-            }
-        } catch (parseError) {
-            console.error('Parse error:', parseError);
-            return Response.json({ 
-                success: false,
-                error: 'Erro ao processar ficheiro: ' + parseError.message
-            }, { status: 500 });
-        }
-
-        console.log('Extracted rows:', extractedDraws.length);
-
-        // Validate and format draws
-        const validDraws = [];
-        
-        for (const item of extractedDraws) {
-            // Validate main numbers
-            if (!item.mainNumbers || item.mainNumbers.length !== lottery.main_count) {
-                console.log('Invalid main numbers count:', item.mainNumbers?.length);
-                continue;
-            }
-
-            // Parse date
-            let drawDate = item.dateStr;
-            
-            if (typeof drawDate === 'number') {
-                // Excel date
-                const excelEpoch = new Date(1899, 11, 30);
-                const date = new Date(excelEpoch.getTime() + drawDate * 86400000);
-                drawDate = date.toISOString().split('T')[0];
-            } else if (typeof drawDate === 'string') {
-                drawDate = drawDate.trim();
-                
-                // Try different formats
-                if (drawDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                    // Already YYYY-MM-DD
-                } else if (drawDate.match(/^\d{2}[-/]\d{2}[-/]\d{4}$/)) {
-                    // DD-MM-YYYY or DD/MM/YYYY
-                    const parts = drawDate.split(/[-/]/);
-                    drawDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
-                } else if (drawDate.match(/^\d{2}[-/]\d{2}[-/]\d{2}$/)) {
-                    // DD-MM-YY or DD/MM/YY
-                    const parts = drawDate.split(/[-/]/);
-                    const year = parseInt(parts[2]) > 50 ? `19${parts[2]}` : `20${parts[2]}`;
-                    drawDate = `${year}-${parts[1]}-${parts[0]}`;
-                } else {
-                    // Try to parse as date string
-                    try {
-                        const parsed = new Date(drawDate);
-                        if (!isNaN(parsed.getTime())) {
-                            drawDate = parsed.toISOString().split('T')[0];
-                        } else {
-                            console.log('Could not parse date:', drawDate);
-                            continue;
-                        }
-                    } catch {
-                        console.log('Failed to parse date:', drawDate);
-                        continue;
-                    }
+                // CASO 2: Totoloto (toto..csv)
+                // Formato: DATA, N1, N2, N3, N4, N5, NS (e lixo depois)
+                else if (lotteryName === "Totoloto") {
+                    drawDate = formatDate(cols[0]);
+                    mainNumbers = cleanNumbers(cols.slice(1, 6));
+                    // O último número válido da linha costuma ser o Número da Sorte
+                    // Mas vamos pegar o índice 6 com segurança
+                    if (cols[6]) extraNumbers = cleanNumbers([cols[6]]);
                 }
-            } else {
-                console.log('Invalid date type:', typeof drawDate);
-                continue;
+
+                // CASO 3: EuroDreams (Lotoideas XLSX/CSV)
+                // Formato: DATA, N1, N2, N3, N4, N5, N6, Sueño
+                else if (lotteryName === "EuroDreams") {
+                    drawDate = formatDate(cols[0]);
+                    mainNumbers = cleanNumbers(cols.slice(1, 7));
+                    if (cols[7]) extraNumbers = cleanNumbers([cols[7]]);
+                }
+
+                // Validação Final da Linha
+                if (drawDate && mainNumbers.length >= 5) {
+                    drawsToSave.push({
+                        lottery_id: lotteryId,
+                        draw_date: drawDate,
+                        main_numbers: mainNumbers,
+                        extra_numbers: extraNumbers
+                    });
+                } else {
+                    skipped++;
+                }
+
+            } catch (e) {
+                console.warn(`Erro na linha ${i}:`, e.message);
+                skipped++;
             }
+        }
 
-            // Final validation
-            if (!/^\d{4}-\d{2}-\d{2}$/.test(drawDate)) {
-                console.log('Final date format invalid:', drawDate);
-                continue;
+        // LIMPEZA ANTES DE IMPORTAR (Opcional: descomente se quiser apagar o histórico antigo dessa lotaria)
+        // const oldDraws = await base44.asServiceRole.entities.Draw.filter({ lottery_id: lotteryId });
+        // for (const d of oldDraws) await base44.asServiceRole.entities.Draw.delete(d.id);
+
+        // SALVA EM BLOCOS (Batch)
+        if (drawsToSave.length > 0) {
+            // Base44 pode ter limite de payload, salvamos em blocos de 50
+            const batchSize = 50;
+            for (let i = 0; i < drawsToSave.length; i += batchSize) {
+                await base44.asServiceRole.entities.Draw.bulkCreate(drawsToSave.slice(i, i + batchSize));
             }
-
-            validDraws.push({
-                lottery_id: lottery_id,
-                draw_date: drawDate,
-                main_numbers: item.mainNumbers,
-                extra_numbers: item.extraNumbers || []
-            });
         }
 
-        console.log('Valid draws after parsing:', validDraws.length);
+        // RE-VALIDAÇÃO AUTOMÁTICA
+        await base44.functions.invoke('validateSuggestions');
 
-        if (validDraws.length === 0) {
-            return Response.json({ 
-                success: false,
-                error: 'Nenhum sorteio válido. Verifique se o ficheiro tem as colunas corretas: Números Principais, Números Extras, Data'
-            }, { status: 400 });
-        }
-
-        // Remove duplicates by date
-        const uniqueDraws = [];
-        const seenDates = new Set();
-        validDraws.forEach(draw => {
-            if (!seenDates.has(draw.draw_date)) {
-                seenDates.add(draw.draw_date);
-                uniqueDraws.push(draw);
-            }
-        });
-
-        console.log('Unique draws:', uniqueDraws.length);
-
-        // Filter out existing
-        const existingDraws = await base44.asServiceRole.entities.Draw.list();
-        const existingDates = new Set(
-            existingDraws
-                .filter(d => d.lottery_id === lottery_id)
-                .map(d => d.draw_date)
-        );
-
-        const newDraws = uniqueDraws.filter(d => !existingDates.has(d.draw_date));
-
-        console.log('New draws to insert:', newDraws.length);
-
-        if (newDraws.length === 0) {
-            return Response.json({
-                success: true,
-                message: 'Todos os sorteios já existem na base',
-                imported: 0,
-                total: uniqueDraws.length
-            });
-        }
-
-        // Insert in batches
-        const batchSize = 100;
-        for (let i = 0; i < newDraws.length; i += batchSize) {
-            const batch = newDraws.slice(i, i + batchSize);
-            await base44.asServiceRole.entities.Draw.bulkCreate(batch);
-            console.log(`Batch ${Math.floor(i / batchSize) + 1} inserted`);
-        }
-
-        console.log('=== IMPORT SUCCESS ===');
-
-        return Response.json({
-            success: true,
-            message: `${newDraws.length} sorteios importados!`,
-            imported: newDraws.length,
-            total: uniqueDraws.length
+        return Response.json({ 
+            success: true, 
+            message: `Importados ${drawsToSave.length} sorteios para ${lotteryName}. (Ignorados: ${skipped})` 
         });
 
     } catch (error) {
-        console.error('=== IMPORT ERROR ===');
-        console.error('Error:', error.message);
-        console.error('Stack:', error.stack);
-        
-        return Response.json({ 
-            success: false,
-            error: error.message || 'Erro ao importar'
-        }, { status: 500 });
+        return Response.json({ success: false, error: error.message }, { status: 500 });
     }
 });
