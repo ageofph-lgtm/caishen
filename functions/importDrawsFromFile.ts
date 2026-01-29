@@ -101,10 +101,13 @@ Deno.serve(async (req) => {
                     mainNumbers = cleanNumbers(cols.slice(2, 8));
                     // SUEÑO está na coluna 8
                     if (cols[8]) extraNumbers = cleanNumbers([cols[8]]);
+                    
+                    console.log(`Linha ${i}: data=${drawDate}, nums=${mainNumbers.length}, extras=${extraNumbers.length}`);
                 }
 
-                // Validação Final da Linha
-                if (drawDate && mainNumbers.length >= 5) {
+                // Validação Final da Linha (EuroDreams precisa de 6 números)
+                const minNumbers = lotteryName === "EuroDreams" ? 6 : 5;
+                if (drawDate && mainNumbers.length >= minNumbers) {
                     drawsToSave.push({
                         lottery_id: lottery_id,
                         draw_date: drawDate,
