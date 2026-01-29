@@ -48,52 +48,58 @@ Deno.serve(async (req) => {
                 let prompt = '';
                 
                 if (lottery.name === 'EuroMilhões') {
-                    prompt = `Busca resultados REAIS do EuroMilhões em jogossantacasa.pt
+                    prompt = `Aceda ao site oficial jogossantacasa.pt e extraia os resultados REAIS do EuroMilhões.
 
-DADOS NECESSÁRIOS: ${batch.count} sorteios ${batch.offset ? `(do ${batch.offset + 1}º ao ${batch.offset + batch.count}º mais recente)` : 'mais recentes'}
+                DADOS NECESSÁRIOS: ${batch.count} sorteios ${batch.offset ? `(do ${batch.offset + 1}º ao ${batch.offset + batch.count}º mais recente)` : 'mais recentes'}
 
-O EuroMilhões tem sorteios às TERÇAS e SEXTAS.
-- 5 números principais de 1 a 50
-- 2 estrelas de 1 a 12
+                O EuroMilhões tem sorteios às TERÇAS e SEXTAS.
+                - 5 números principais de 1 a 50
+                - 2 estrelas de 1 a 12
 
-Formato de resposta para CADA sorteio:
-- draw_date: YYYY-MM-DD
-- main_numbers: [5 números inteiros]
-- extra_numbers: [2 números inteiros]
+                Se a base estiver vazia, busque o histórico retroativo disponível (últimos 50+ sorteios).
 
-CRÍTICO: Retorna dados REAIS do site oficial. Não invente nenhum número.`;
+                Formato de resposta para CADA sorteio:
+                - draw_date: YYYY-MM-DD
+                - main_numbers: [5 números inteiros]
+                - extra_numbers: [2 números inteiros]
+
+                CRÍTICO: Apenas dados REAIS do site oficial. Formato JSON estrito.`;
 
                 } else if (lottery.name === 'Totoloto') {
-                    prompt = `Busca resultados REAIS do Totoloto em jogossantacasa.pt
+                    prompt = `Aceda ao site oficial jogossantacasa.pt e extraia os resultados REAIS do Totoloto.
 
-DADOS NECESSÁRIOS: ${batch.count} sorteios ${batch.offset ? `(do ${batch.offset + 1}º ao ${batch.offset + batch.count}º mais recente)` : 'mais recentes'}
+                DADOS NECESSÁRIOS: ${batch.count} sorteios ${batch.offset ? `(do ${batch.offset + 1}º ao ${batch.offset + batch.count}º mais recente)` : 'mais recentes'}
 
-O Totoloto tem sorteios às QUARTAS e SÁBADOS.
-- 5 números principais de 1 a 49
-- 1 número da sorte de 1 a 13
+                O Totoloto tem sorteios às QUARTAS e SÁBADOS.
+                - 5 números principais de 1 a 49
+                - 1 número da sorte de 1 a 13
 
-Formato de resposta para CADA sorteio:
-- draw_date: YYYY-MM-DD
-- main_numbers: [5 números inteiros]
-- extra_numbers: [1 número inteiro]
+                Se a base estiver vazia, busque o histórico retroativo disponível (últimos 50+ sorteios).
 
-CRÍTICO: Retorna dados REAIS do site oficial. Não invente nenhum número.`;
+                Formato de resposta para CADA sorteio:
+                - draw_date: YYYY-MM-DD
+                - main_numbers: [5 números inteiros]
+                - extra_numbers: [1 número inteiro]
+
+                CRÍTICO: Apenas dados REAIS do site oficial. Formato JSON estrito.`;
 
                 } else if (lottery.name === 'EuroDreams') {
-                    prompt = `Busca resultados REAIS do EuroDreams em jogossantacasa.pt
+                    prompt = `Aceda ao site oficial jogossantacasa.pt e extraia os resultados REAIS do EuroDreams.
 
-DADOS NECESSÁRIOS: ${batch.count} sorteios ${batch.offset ? `(do ${batch.offset + 1}º ao ${batch.offset + batch.count}º mais recente)` : 'mais recentes'}
+                DADOS NECESSÁRIOS: ${batch.count} sorteios ${batch.offset ? `(do ${batch.offset + 1}º ao ${batch.offset + batch.count}º mais recente)` : 'mais recentes'}
 
-O EuroDreams tem sorteios às SEGUNDAS e QUINTAS.
-- 6 números principais de 1 a 40
-- 1 número Dream de 1 a 5
+                O EuroDreams tem sorteios às SEGUNDAS e QUINTAS.
+                - 6 números principais de 1 a 40
+                - 1 número Dream de 1 a 5
 
-Formato de resposta para CADA sorteio:
-- draw_date: YYYY-MM-DD
-- main_numbers: [6 números inteiros]
-- extra_numbers: [1 número inteiro]
+                Se a base estiver vazia, busque o histórico retroativo disponível (últimos 50+ sorteios).
 
-CRÍTICO: Retorna dados REAIS do site oficial. Não invente nenhum número.`;
+                Formato de resposta para CADA sorteio:
+                - draw_date: YYYY-MM-DD
+                - main_numbers: [6 números inteiros]
+                - extra_numbers: [1 número inteiro]
+
+                CRÍTICO: Apenas dados REAIS do site oficial. Formato JSON estrito.`;
                 } else {
                     continue;
                 }

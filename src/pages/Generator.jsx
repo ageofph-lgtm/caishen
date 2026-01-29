@@ -79,14 +79,15 @@ export default function Generator() {
     }
   }, [lotteries, selectedLottery]);
 
-  // Auto-adjust weights based on validated suggestions performance
+  // MACHINE LEARNING ADAPTATIVO - Ajuste inteligente de pesos
   React.useEffect(() => {
     if (validatedSuggestions.length >= 3) {
       console.log('🧠 Analyzing', validatedSuggestions.length, 'validated suggestions...');
-      
+
       // Calculate average performance
-      const avgMatches = validatedSuggestions.reduce((sum, s) => sum + (s.matches_main || 0), 0) / validatedSuggestions.length;
-      
+      const totalMatches = validatedSuggestions.reduce((sum, s) => sum + (s.matches_main || 0), 0);
+      const avgPerformance = totalMatches / validatedSuggestions.length;
+
       // Analyze which numbers worked best
       const successfulNumbers = {};
       validatedSuggestions.forEach(sugg => {
@@ -105,32 +106,23 @@ export default function Generator() {
         .map(([num]) => parseInt(num));
 
       console.log('📊 Top successful numbers from AI:', topSuccessfulNumbers);
-      console.log('📈 Average matches:', avgMatches.toFixed(2));
-      
-      // Adjust weights based on performance
-      let adjustmentFactor = 1.0;
-      if (avgMatches < 1) {
-        adjustmentFactor = 0.8;
-        console.log('⚠️ Low performance - reducing confidence');
-      } else if (avgMatches < 2) {
-        adjustmentFactor = 0.95;
-        console.log('📉 Medium performance - slight adjustment');
-      } else {
-        console.log('✅ Good performance - maintaining strategy');
-      }
-      
-      if (adjustmentFactor !== 1.0) {
-        setSettings(prev => ({
-          ...prev,
-          weights: {
-            base_frequency: prev.weights.base_frequency * adjustmentFactor,
-            recency_hot: prev.weights.recency_hot * (1 / adjustmentFactor),
-            delay_cold: prev.weights.delay_cold * adjustmentFactor,
-            pair_affinity: prev.weights.pair_affinity,
-            even_odd_balance: prev.weights.even_odd_balance,
-          }
-        }));
-      }
+      console.log('📈 Average matches:', avgPerformance.toFixed(2));
+
+      // FEEDBACK LOOP: Ajusta estratégia baseado em resultados
+      setSettings(prev => ({
+        ...prev,
+        weights: {
+          // Se acertamos pouco, damos mais peso aos números que NÃO saíram (delay_cold)
+          delay_cold: avgPerformance < 1.0 ? prev.weights.delay_cold * 1.2 : prev.weights.delay_cold,
+          // Se acertamos muito, mantemos a estratégia de números frequentes (base_frequency)
+          base_frequency: avgPerformance > 1.5 ? prev.weights.base_frequency * 1.1 : prev.weights.base_frequency,
+          recency_hot: avgPerformance < 1.0 ? prev.weights.recency_hot * 0.9 : prev.weights.recency_hot * 1.05,
+          pair_affinity: prev.weights.pair_affinity,
+          even_odd_balance: prev.weights.even_odd_balance,
+        }
+      }));
+
+      console.log('🧠 IA ajustou pesos para melhorar eficácia.');
     }
   }, [validatedSuggestions]);
 

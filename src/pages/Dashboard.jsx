@@ -160,9 +160,9 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50">
+    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-blue-50">
       {/* Top Bar with Logo */}
-      <div className="bg-white shadow-md">
+      <div className="bg-white shadow-xl border-b border-indigo-100">
         <div className="max-w-7xl mx-auto py-4 px-6 flex justify-center">
           <img 
             src="https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/68e7d9054f905ab0cb15db1c/c02da0b50_Gemini_Generated_Image_b05kdwb05kdwb05k.png" 
@@ -173,15 +173,18 @@ export default function Dashboard() {
       </div>
 
       <div className="max-w-7xl mx-auto space-y-6 p-6">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        {/* Header Redesenhado */}
+        <div className="flex flex-col md:flex-row justify-between items-center gap-6 bg-white p-6 rounded-3xl shadow-xl border border-indigo-50">
           <div>
-            <p className="text-gray-600 mt-2">Análise Inteligente de Loterias com IA</p>
+            <h1 className="text-4xl font-black bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-purple-600">
+              CAISHEN AI
+            </h1>
+            <p className="text-gray-400 font-medium mt-1">Motor de Inteligência Preditiva</p>
           </div>
 
           <div className="flex gap-3 w-full md:w-auto flex-wrap">
             <Select value={selectedLottery || ''} onValueChange={setSelectedLottery}>
-              <SelectTrigger className="w-48">
+              <SelectTrigger className="w-48 border-indigo-200">
                 <SelectValue placeholder="Selecione a loteria" />
               </SelectTrigger>
               <SelectContent>
@@ -193,51 +196,44 @@ export default function Dashboard() {
               </SelectContent>
             </Select>
 
-            <Link to={createPageUrl('History')}>
-              <Button
-                variant="outline"
-                className="bg-red-50 hover:bg-red-100 border-red-200"
-              >
-                <AlertCircle className="w-4 h-4 mr-2" />
-                Limpeza Manual
-              </Button>
-            </Link>
-
             <Button
-              variant="outline"
+              variant="ghost"
               onClick={handleSync}
               disabled={isSyncing || isRepopulating}
+              className="text-indigo-600"
             >
-              <RefreshCw className={`w-4 h-4 mr-2 ${isSyncing ? 'animate-spin' : ''}`} />
-              {isSyncing ? 'Sincronizando...' : 'Sincronizar'}
+              <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
             </Button>
 
             <Button
-              variant="default"
-              onClick={handleRepopulate}
-              disabled={isSyncing || isRepopulating}
-              className="bg-green-600 hover:bg-green-700"
-            >
-              <Database className={`w-4 h-4 mr-2 ${isRepopulating ? 'animate-spin' : ''}`} />
-              {isRepopulating ? 'Recuperando...' : 'Recuperar Dados'}
-            </Button>
-
-            <Button
-              variant="outline"
+              variant="ghost"
               onClick={() => setShowDataPanel(!showDataPanel)}
+              className="text-gray-600"
             >
-              <Database className="w-4 h-4 mr-2" />
-              Dados
+              <Database className="w-4 h-4" />
             </Button>
 
             <Link to={createPageUrl('Generator')}>
-              <Button className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
-                <Sparkles className="w-4 h-4 mr-2" />
-                Gerar
+              <Button className="h-12 px-8 bg-gradient-to-r from-blue-600 to-indigo-700 hover:scale-105 transition-transform rounded-2xl shadow-lg">
+                <Sparkles className="mr-2 h-5 w-5" />
+                Gerar Previsão Certeira
               </Button>
             </Link>
           </div>
-        </div>
+          </div>
+
+          {/* Card de Status do Machine Learning */}
+          <Card className="bg-gradient-to-br from-indigo-900 to-purple-900 text-white p-6 border-none overflow-hidden relative">
+          <div className="relative z-10 flex justify-between items-center">
+             <div>
+               <p className="text-indigo-200 text-sm uppercase tracking-wider font-semibold">Status do Aprendizado</p>
+               <h2 className="text-3xl font-bold mt-1">{allDraws.length} Sorteios Analisados</h2>
+               <p className="text-indigo-300 text-sm mt-2">IA em modo autônomo • Performance crescente</p>
+             </div>
+             <Brain className="w-16 h-16 opacity-30" />
+          </div>
+          <div className="absolute top-0 right-0 w-40 h-40 bg-white/10 rounded-full -mr-20 -mt-20 blur-3xl"></div>
+          </Card>
 
         {/* Sync Message */}
         {syncMessage && (
