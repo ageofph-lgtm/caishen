@@ -82,24 +82,25 @@ Deno.serve(async (req) => {
             try {
                 if (lotteryName === "EuroDreams") {
                     // EuroDreams: 6 Principais + 1 Sonho
-                    // Formato esperado: DATA, N1, N2, N3, N4, N5, N6, SONHO
+                    // Formato comum: DATA, COMB. GANADORA (vazio), N1, N2, N3, N4, N5, N6, SUEÑO
                     
-                    // Validação de segurança: precisa ter pelo menos 8 colunas
-                    if (cols.length < 8) throw new Error("Colunas insuficientes");
-
-                    mainNumbers = cleanNumbers(cols.slice(1, 7)); // Índices 1 a 6
-                    extraNumbers = cleanNumbers([cols[7]]);       // Índice 7
+                    // Detecta se cols[1] é número ou texto/vazio (coluna COMB. GANADORA)
+                    let startIdx = 1;
+                    if (cols[1] && isNaN(parseInt(cols[1]))) {
+                        // cols[1] não é número, pula para cols[2]
+                        startIdx = 2;
+                        console.log(`Linha ${i+1}: Coluna "COMB. GANADORA" detectada, usando índice ${startIdx}`);
+                    }
+                    
+                    // Pega 6 números principais a partir de startIdx
+                    mainNumbers = cleanNumbers(cols.slice(startIdx, startIdx + 6));
+                    
+                    // Pega o Sueño (1 número extra)
+                    extraNumbers = cleanNumbers([cols[startIdx + 6]]);
                     
                     // Validação Estrita
                     if (mainNumbers.length !== 6 || extraNumbers.length !== 1) {
-                        // Tenta "shift" caso haja uma coluna vazia extra (comum em CSVs mal formatados)
-                        const allNums = cleanNumbers(cols.slice(1));
-                        if (allNums.length === 7) {
-                            mainNumbers = allNums.slice(0, 6);
-                            extraNumbers = allNums.slice(6);
-                        } else {
-                            throw new Error(`Contagem incorreta: ${mainNumbers.length}+${extraNumbers.length}`);
-                        }
+                        throw new Error(`EuroDreams precisa 6 números + 1 Sueño. Encontrados: ${mainNumbers.length}+${extraNumbers.length}`);
                     }
                 } 
                 else if (lotteryName === "EuroMilhões") {
