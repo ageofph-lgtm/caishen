@@ -61,6 +61,8 @@ Deno.serve(async (req) => {
             const line = lines[i].trim();
             if (!line) continue;
 
+            console.log(`[Linha ${i}] Raw: ${line.substring(0, 100)}`);
+
             // Lógica Inteligente para o "Formato Universal" (Data, "Nums", "Extras")
             // Usamos Regex para capturar grupos entre aspas, se existirem
             // Ex: 2026-01-26,"15,23...","3"
@@ -73,18 +75,22 @@ Deno.serve(async (req) => {
             const quotedMatch = line.match(/^([^,]+),"([^"]+)","([^"]+)"/);
 
             if (quotedMatch) {
+                console.log(`[Linha ${i}] Formato com aspas detectado`);
                 // FORMATO PADRONIZADO (O que você acabou de gerar)
                 datePart = quotedMatch[1];
                 mainPart = quotedMatch[2];
                 extraPart = quotedMatch[3];
             } else {
+                console.log(`[Linha ${i}] Formato flat detectado`);
                 // FORMATO LEGADO/FLAT (Caso o usuário suba um CSV simples sem aspas)
                 // Remove aspas globais e divide tudo por vírgula
                 const cols = line.replace(/"/g, '').split(',');
+                console.log(`[Linha ${i}] Colunas: ${cols.length}, Primeira: ${cols[0]}`);
                 datePart = cols[0];
                 
                 // Distribuição baseada nas regras da lotaria
                 const allNums = cols.slice(1);
+                console.log(`[Linha ${i}] Números encontrados: ${allNums.length}`);
                 
                 if (lotteryName === "EuroDreams") { // 6 + 1
                     mainPart = allNums.slice(0, 6).join(',');
@@ -98,9 +104,13 @@ Deno.serve(async (req) => {
                 }
             }
 
+            console.log(`[Linha ${i}] Date: ${datePart}, Main: ${mainPart}, Extra: ${extraPart}`);
+
             const drawDate = parseDate(datePart);
             const mainNumbers = parseNumbers(mainPart);
             const extraNumbers = parseNumbers(extraPart);
+
+            console.log(`[Linha ${i}] Parsed - Date: ${drawDate}, Main: [${mainNumbers}], Extra: [${extraNumbers}]`);
 
             // Validação Final
             if (drawDate && mainNumbers.length > 0) {
@@ -110,7 +120,9 @@ Deno.serve(async (req) => {
                     main_numbers: mainNumbers,
                     extra_numbers: extraNumbers
                 });
+                console.log(`[Linha ${i}] ✓ Adicionado`);
             } else {
+                console.log(`[Linha ${i}] ✗ Ignorado`);
                 skipped++;
             }
         }
