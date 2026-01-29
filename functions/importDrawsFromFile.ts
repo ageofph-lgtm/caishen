@@ -52,22 +52,70 @@ Deno.serve(async (req) => {
         
         const lotteryName = lottery.name;
 
-        // Processa as linhas do CSV
+        // Processa as linhas do CSV ou PDF extraído
         const lines = fileContent.split('\n');
         const drawsToSave = [];
         let skipped = 0;
         
-        // Detecta o separador (vírgula ou ponto-e-vírgula)
-        const separator = fileContent.includes(';') ? ';' : ',';
-        console.log(`Usando separador: ${separator === ';' ? 'ponto-e-vírgula' : 'vírgula'}`);
+        // Detecta se é PDF extraído (números separados por espaços) ou CSV normal
+        const isPdfFormat = fileName.toLowerCase().includes('.pdf') || 
+                           (lines[1] && lines[1].split(' ').filter(x => x.trim()).length > 10);
+        
+        console.log(`Formato detectado: ${isPdfFormat ? 'PDF (espaços)' : 'CSV'}`);
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
-            if (!line || i === 0) continue; // Pula cabeçalho e linhas vazias
+            if (!line || i === 0 || line.includes('FECHA') || line.includes('COMB.')) continue;
 
-            // Remove aspas extras e tabulações
-            const cleanLine = line.replace(/"/g, '').replace(/\t/g, separator); 
-            const cols = cleanLine.split(separator).map(c => c.trim());
+            let cols: string[] = [];
+            
+            if (isPdfFormat && lotteryName === "EuroDreams") {
+                // Formato PDF: "2 6 / 0 1 / 2 0 2 6 1 5 2 3 2 8 3 3 3 4 3 7 3"
+                // Reconstruir data e números
+                const parts = line.split(/\s+/).filter(x => x.trim());
+                
+                // Tentar reconstruir a data (primeiros elementos até encontrar padrão DD/MM/YYYY)
+                let dateStr = '';
+                let idx = 0;
+                
+                // Buscar padrão: D D / M M / Y Y Y Y
+                if (parts.length >= 10) {
+                    // Pode ser: "26/01/2026..." ou "2 6 / 0 1 / 2 0 2 6 ..."
+                    if (parts[0].includes('/')) {
+                        dateStr = parts[0];
+                        idx = 1;
+                    } else {
+                        // Reconstruir: partes[0]+partes[1] / partes[3]+partes[4] / partes[6...9]
+                        dateStr = parts[0] + parts[1] + '/' + parts[3] + parts[4] + '/' + 
+                                  parts[6] + parts[7] + parts[8] + parts[9];
+                        idx = 10;
+                    }
+                    
+                    // Números principais: próximos 6 números (12 dígitos se separados)
+                    const remainingParts = parts.slice(idx);
+                    const numbers = remainingParts.filter(p => /^\d+$/.test(p));
+                    
+                    // Juntar pares de dígitos se necessário
+                    if (numbers.length > 7) {
+                        const mainNums = [];
+                        for (let j = 0; j < 12; j += 2) {
+                            if (numbers[j] && numbers[j+1]) {
+                                mainNums.push(numbers[j] + numbers[j+1]);
+                            }
+                        }
+                        const extra = numbers[12] ? (numbers[13] ? numbers[12] + numbers[13] : numbers[12]) : '';
+                        cols = [dateStr, '', ...mainNums, extra];
+                    } else {
+                        // Números já estão agrupados
+                        cols = [dateStr, '', ...numbers];
+                    }
+                }
+            } else {
+                // Formato CSV normal
+                const separator = fileContent.includes(';') ? ';' : ',';
+                const cleanLine = line.replace(/"/g, '').replace(/\t/g, separator);
+                cols = cleanLine.split(separator).map(c => c.trim());
+            }
 
             let drawDate = null;
             let mainNumbers: number[] = [];
