@@ -63,6 +63,14 @@ Deno.serve(async (req) => {
             const cleanLine = line.replace(/"/g, ''); 
             const cols = cleanLine.split(',').map(c => c.trim());
 
+            // Log primeira linha para debug
+            if (i === 0) {
+                console.log('Primeira linha (cabeçalho?):', cols);
+            }
+            if (i === 1) {
+                console.log('Segunda linha (primeiro sorteio?):', cols);
+            }
+
             // 1. Tenta encontrar uma data válida na primeira coluna
             // Isto filtra automaticamente cabeçalhos como "FECHA,COMB..." ou "www.lotoideas..."
             const drawDate = parseDate(cols[0]);
@@ -77,15 +85,20 @@ Deno.serve(async (req) => {
 
             try {
                 // LÓGICA ESPECÍFICA EURODREAMS
-                // Formato Lotoideas: DATA(0), N1(1), N2(2), N3(3), N4(4), N5(5), N6(6), Sueño(7)
                 if (lotteryName === "EuroDreams") {
-                    // Pega exatamente 6 números principais (colunas 1 a 6)
-                    mainNumbers = cleanNumbers(cols.slice(1, 7));
+                    // Detecta se existe coluna "COMB. GANADORA" ou similar
+                    // Se cols[1] não é um número, pula essa coluna
+                    const startIdx = (cols[1] && isNaN(parseInt(cols[1]))) ? 2 : 1;
                     
-                    // Pega o número "Sueño" (coluna 7)
-                    if (cols[7]) {
-                        extraNumbers = cleanNumbers([cols[7]]);
+                    // Pega exatamente 6 números principais
+                    mainNumbers = cleanNumbers(cols.slice(startIdx, startIdx + 6));
+                    
+                    // Pega o número "Sueño" (última coluna com número)
+                    if (cols[startIdx + 6]) {
+                        extraNumbers = cleanNumbers([cols[startIdx + 6]]);
                     }
+                    
+                    console.log(`Linha ${i}: startIdx=${startIdx}, nums=${mainNumbers.join(',')}, extra=${extraNumbers.join(',')}`);
                 } 
                 // Lógica de fallback para outras lotarias (se o ficheiro for outro)
                 else if (lotteryName === "EuroMilhões") {
