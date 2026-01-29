@@ -68,13 +68,21 @@ Deno.serve(async (req) => {
 
             const cols = line.split(delimiter).map(c => c.trim());
 
+            // Debug das primeiras linhas
+            if (i < 3) {
+                console.log(`Linha ${i}: [${cols.join(' | ')}]`);
+            }
+
             // Tenta encontrar a data na primeira coluna
             const drawDate = parseDate(cols[0]);
 
             if (!drawDate) {
+                if (i < 3) console.log(`Linha ${i}: Data inválida ou cabeçalho - "${cols[0]}"`);
                 skippedCount++; // Cabeçalho ou lixo
                 continue;
             }
+
+            if (i < 3) console.log(`Linha ${i}: Data parseada como ${drawDate}`);
 
             let mainNumbers: number[] = [];
             let extraNumbers: number[] = [];
