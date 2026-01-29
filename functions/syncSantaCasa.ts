@@ -2,7 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.4';
 
 Deno.serve(async (req) => {
     try {
-        console.log('=== SYNC SANTA CASA - SINCRONIZAÇÃO INTELIGENTE POR PERÍODOS ===');
+        console.log('=== SYNC SANTA CASA - SINCRONIZAÇÃO POR BLOCOS ANUAIS ===');
         
         const base44 = createClientFromRequest(req);
         
@@ -27,7 +27,7 @@ Deno.serve(async (req) => {
         const results = [];
 
         for (const lottery of uniqueLotteries) {
-            console.log(`\n--- Processando ${lottery.name} ---`);
+            console.log(`\n--- Iniciando busca profunda para ${lottery.name} ---`);
 
             // 1. LIMPEZA AUTOMÁTICA: Se for rebuild, remove histórico antigo
             if (isFullRebuild) {
@@ -38,30 +38,32 @@ Deno.serve(async (req) => {
                     });
                     console.log(`Encontrados ${oldDraws.length} sorteios para remover`);
                     
-                    // Deleta em lote para evitar timeout
+                    // Deleta para garantir dados limpos
                     for (const oldDraw of oldDraws) {
                         await base44.asServiceRole.entities.Draw.delete(oldDraw.id);
                     }
                     console.log(`✓ Removidos ${oldDraws.length} sorteios antigos`);
                 } catch (deleteError) {
                     console.error('Erro ao deletar:', deleteError.message);
-                    // Continua mesmo se houver erro na deleção
                 }
             }
 
-            // 2. DEFINIÇÃO DO ALVO (Anos a procurar)
-            const currentYear = new Date().getFullYear();
-            const yearsToFetch = isFullRebuild 
-                ? [currentYear, currentYear - 1, currentYear - 2, currentYear - 3, 'anos anteriores']
-                : [currentYear];
+            // 2. DEFINIÇÃO DO ALCANCE HISTÓRICO (Ano inicial até hoje)
+            const startYear = lottery.name === 'EuroMilhões' ? 2004 : 
+                             lottery.name === 'EuroDreams' ? 2023 : 
+                             lottery.name === 'Totoloto' ? 2010 : 2020;
+            const endYear = new Date().getFullYear();
             
-            console.log('Períodos a buscar:', yearsToFetch);
+            console.log(`Buscando histórico de ${startYear} até ${endYear}`);
 
             let allNewDraws = [];
 
-            for (const period of yearsToFetch) {
-                console.log(`\n--- Buscando dados de ${lottery.name} para: ${period} ---`);
-                let prompt = '';
+            // 3. BUSCA ANO A ANO PARA EVITAR TIMEOUT
+            if (isFullRebuild) {
+                for (let year = endYear; year >= startYear; year--) {
+                    console.log(`\n📅 Buscando ${lottery.name} - Ano ${year}`);
+                    
+                    let prompt = '';
                 
                 if (lottery.name === 'EuroMilhões') {
                     prompt = `Aceda ao site oficial jogossantacasa.pt. 
@@ -185,22 +187,14 @@ Deno.serve(async (req) => {
                 }
                 }
 
-            // Bulk create new draws
-            if (allNewDraws.length > 0) {
-                // Sort by date descending
-                allNewDraws.sort((a, b) => b.draw_date.localeCompare(a.draw_date));
-
-                console.log(`📥 Inserindo ${allNewDraws.length} sorteios para ${lottery.name}...`);
-                await base44.asServiceRole.entities.Draw.bulkCreate(allNewDraws);
-                console.log(`✓ ${allNewDraws.length} sorteios inseridos com sucesso`);
-            }
+            console.log(`\n✅ Total de ${allNewDraws.length} sorteios processados para ${lottery.name}`);
 
             results.push({
                 lottery: lottery.name,
                 synced: allNewDraws.length,
                 message: allNewDraws.length > 0 
-                    ? `${allNewDraws.length} novo(s) sorteio(s) importado(s)`
-                    : isFullRebuild ? 'Reconstrução concluída' : 'Base já atualizada'
+                    ? `${allNewDraws.length} sorteio(s) sincronizado(s)`
+                    : 'Base já atualizada'
             });
 
             // AUTO-VALIDATE SUGGESTIONS - Now checks ALL suggestions for this lottery
@@ -265,7 +259,7 @@ Deno.serve(async (req) => {
         return Response.json({
             success: true,
             message: isFullRebuild 
-                ? `✓ Base reconstruída: ${totalSynced} sorteios importados por períodos`
+                ? `✓ Histórico completo sincronizado: ${totalSynced} sorteios por blocos anuais`
                 : totalSynced > 0 
                     ? `✓ ${totalSynced} novo(s) sorteio(s) sincronizado(s)`
                     : '✓ Base de dados já atualizada',

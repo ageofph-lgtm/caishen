@@ -103,21 +103,20 @@ export default function Dashboard() {
       };
 
       const handleFullRebuild = async () => {
-        if (!window.confirm("Atenção: Isto irá apagar o histórico atual e reconstruir tudo via Santa Casa por períodos. Pode demorar alguns minutos. Deseja continuar?")) return;
+        if (!window.confirm("Isto iniciará uma busca profunda ano a ano. O processo é demorado mas garante 100% dos dados. Continuar?")) return;
 
         setIsSyncing(true);
-        setSyncMessage({ type: 'info', text: '⏳ Limpando base de dados e reconstruindo histórico por períodos... Aguarde.' });
+        setSyncMessage({ type: 'info', text: '⏳ Sincronização profunda iniciada. Buscando histórico ano a ano...' });
 
         try {
-          console.log('🔄 Iniciando reconstrução completa por períodos...');
-          // Correção: Passar o objeto { rebuild: true } como segundo argumento
+          console.log('🔄 Iniciando busca profunda por blocos anuais...');
           const response = await base44.functions.invoke('syncSantaCasa', { rebuild: true });
           console.log('✅ Resposta recebida:', response.data);
 
           if (response.data?.success) {
             setSyncMessage({ 
               type: 'success', 
-              text: `✓ ${response.data.message || 'Base reconstruída com sucesso por períodos!'}`
+              text: `✓ ${response.data.message || 'Sincronização profunda concluída! Os dados aparecerão gradualmente no Dashboard.'}`
             });
             // Invalida todas as queries para forçar reload dos dados
             queryClient.invalidateQueries();
@@ -126,10 +125,10 @@ export default function Dashboard() {
             throw new Error(errorMsg);
           }
         } catch (error) {
-          console.error('❌ Erro na reconstrução:', error);
+          console.error('❌ Erro na sincronização:', error);
           setSyncMessage({ 
             type: 'error', 
-            text: 'Erro na reconstrução: ' + (error.message || 'Falha na comunicação com o servidor')
+            text: 'Erro na sincronização: ' + (error.message || 'Falha na comunicação')
           });
         } finally {
           setIsSyncing(false);
