@@ -56,14 +56,18 @@ Deno.serve(async (req) => {
         const lines = fileContent.split('\n');
         const drawsToSave = [];
         let skipped = 0;
+        
+        // Detecta o separador (vírgula ou ponto-e-vírgula)
+        const separator = fileContent.includes(';') ? ';' : ',';
+        console.log(`Usando separador: ${separator === ';' ? 'ponto-e-vírgula' : 'vírgula'}`);
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
             if (!line || i === 0) continue; // Pula cabeçalho e linhas vazias
 
-            // Remove aspas extras que o CSV possa ter
-            const cleanLine = line.replace(/"/g, ''); 
-            const cols = cleanLine.split(',').map(c => c.trim());
+            // Remove aspas extras e tabulações
+            const cleanLine = line.replace(/"/g, '').replace(/\t/g, separator); 
+            const cols = cleanLine.split(separator).map(c => c.trim());
 
             let drawDate = null;
             let mainNumbers: number[] = [];
