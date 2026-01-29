@@ -19,29 +19,38 @@ function cleanNumbers(nums: any[]): number[] {
     return nums
         .map(n => parseInt(String(n).trim()))
         .filter(n => !isNaN(n))
-        .sort((a, b) => a - b); // Ordena sempre para evitar confusão
+        .sort((a, b) => a - b);
 }
 
 Deno.serve(async (req) => {
     try {
         const base44 = createClientFromRequest(req);
-        const { fileContent, fileName } = await req.json();
+        const { lottery_id, file_url } = await req.json();
 
-        if (!fileContent) throw new Error("Conteúdo do arquivo vazio.");
+        if (!lottery_id || !file_url) {
+            throw new Error("Parâmetros obrigatórios: lottery_id e file_url");
+        }
 
-        console.log(`A processar ficheiro: ${fileName}`);
+        console.log(`Baixando ficheiro: ${file_url}`);
         
-        // Deteta a lotaria pelo nome do ficheiro ou cabeçalho
-        let lotteryName = "";
-        if (fileName.toLowerCase().includes("eurodreams")) lotteryName = "EuroDreams";
-        else if (fileName.toLowerCase().includes("euromillones") || fileName.toLowerCase().includes("euromilhoes")) lotteryName = "EuroMilhões";
-        else if (fileName.toLowerCase().includes("toto")) lotteryName = "Totoloto";
-        else throw new Error("Não foi possível identificar a lotaria pelo nome do ficheiro.");
+        // Busca o ficheiro pela URL
+        const fileResponse = await fetch(file_url);
+        if (!fileResponse.ok) {
+            throw new Error("Erro ao baixar o ficheiro");
+        }
+        
+        const fileContent = await fileResponse.text();
+        const fileName = file_url.split('/').pop() || 'file.csv';
+        
+        console.log(`Processando ficheiro: ${fileName}`);
 
-        // Busca o ID da lotaria
-        const lotteries = await base44.asServiceRole.entities.Lottery.filter({ name: lotteryName });
-        if (lotteries.length === 0) throw new Error(`Lotaria '${lotteryName}' não encontrada no sistema.`);
-        const lotteryId = lotteries[0].id;
+        // Busca informações da lotaria
+        const lottery = await base44.asServiceRole.entities.Lottery.get(lottery_id);
+        if (!lottery) {
+            throw new Error("Lotaria não encontrada");
+        }
+        
+        const lotteryName = lottery.name;
 
         // Processa as linhas do CSV
         const lines = fileContent.split('\n');
@@ -50,7 +59,7 @@ Deno.serve(async (req) => {
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
-            if (!line || i === 0) continue; // Pula cabeçalho e linhas vazias (Assumindo cabeçalho na linha 1)
+            if (!line || i === 0) continue; // Pula cabeçalho e linhas vazias
 
             // Remove aspas extras que o CSV possa ter
             const cleanLine = line.replace(/"/g, ''); 
@@ -67,21 +76,16 @@ Deno.serve(async (req) => {
                 // Formato: DATA, N1, N2, N3, N4, N5, (vazio), E1, E2
                 if (lotteryName === "EuroMilhões") {
                     drawDate = formatDate(cols[0]);
-                    // Números principais (índices 1 a 5)
                     mainNumbers = cleanNumbers(cols.slice(1, 6));
-                    // Estrelas (índices 7 a 8 - pula o 6 que costuma ser vazio no lotoideas)
-                    // Se a coluna 6 tiver dados, usamos ela, senão pulamos
                     const startExtra = cols[6] === '' ? 7 : 6;
                     extraNumbers = cleanNumbers(cols.slice(startExtra, startExtra + 2));
                 } 
                 
                 // CASO 2: Totoloto (toto..csv)
-                // Formato: DATA, N1, N2, N3, N4, N5, NS (e lixo depois)
+                // Formato: DATA, N1, N2, N3, N4, N5, NS
                 else if (lotteryName === "Totoloto") {
                     drawDate = formatDate(cols[0]);
                     mainNumbers = cleanNumbers(cols.slice(1, 6));
-                    // O último número válido da linha costuma ser o Número da Sorte
-                    // Mas vamos pegar o índice 6 com segurança
                     if (cols[6]) extraNumbers = cleanNumbers([cols[6]]);
                 }
 
@@ -96,7 +100,7 @@ Deno.serve(async (req) => {
                 // Validação Final da Linha
                 if (drawDate && mainNumbers.length >= 5) {
                     drawsToSave.push({
-                        lottery_id: lotteryId,
+                        lottery_id: lottery_id,
                         draw_date: drawDate,
                         main_numbers: mainNumbers,
                         extra_numbers: extraNumbers
@@ -111,13 +115,8 @@ Deno.serve(async (req) => {
             }
         }
 
-        // LIMPEZA ANTES DE IMPORTAR (Opcional: descomente se quiser apagar o histórico antigo dessa lotaria)
-        // const oldDraws = await base44.asServiceRole.entities.Draw.filter({ lottery_id: lotteryId });
-        // for (const d of oldDraws) await base44.asServiceRole.entities.Draw.delete(d.id);
-
         // SALVA EM BLOCOS (Batch)
         if (drawsToSave.length > 0) {
-            // Base44 pode ter limite de payload, salvamos em blocos de 50
             const batchSize = 50;
             for (let i = 0; i < drawsToSave.length; i += batchSize) {
                 await base44.asServiceRole.entities.Draw.bulkCreate(drawsToSave.slice(i, i + batchSize));
@@ -125,14 +124,20 @@ Deno.serve(async (req) => {
         }
 
         // RE-VALIDAÇÃO AUTOMÁTICA
-        await base44.functions.invoke('validateSuggestions');
+        try {
+            await base44.functions.invoke('validateSuggestions');
+        } catch (valError) {
+            console.warn('Erro na validação (não crítico):', valError.message);
+        }
 
         return Response.json({ 
             success: true, 
+            imported: drawsToSave.length,
             message: `Importados ${drawsToSave.length} sorteios para ${lotteryName}. (Ignorados: ${skipped})` 
         });
 
     } catch (error) {
+        console.error('Erro na importação:', error);
         return Response.json({ success: false, error: error.message }, { status: 500 });
     }
 });
