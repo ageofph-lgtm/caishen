@@ -2,15 +2,15 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.4';
 
 Deno.serve(async (req) => {
     try {
-        console.log('=== SYNC SANTA CASA - RECONSTRUÇÃO INTELIGENTE ===');
+        console.log('=== SYNC SANTA CASA - SINCRONIZAÇÃO INTELIGENTE POR PERÍODOS ===');
         
         const base44 = createClientFromRequest(req);
         
         // Captura o parâmetro rebuild do corpo da requisição
         const body = await req.json().catch(() => ({}));
-        const rebuild = body.rebuild === true;
+        const isFullRebuild = body.rebuild === true;
         
-        console.log('Rebuild mode:', rebuild);
+        console.log('Full Rebuild mode:', isFullRebuild);
 
         const lotteries = await base44.asServiceRole.entities.Lottery.filter({ is_active: true });
         
@@ -27,11 +27,11 @@ Deno.serve(async (req) => {
         const results = [];
 
         for (const lottery of uniqueLotteries) {
-            console.log(`\n--- Syncing ${lottery.name} ---`);
+            console.log(`\n--- Processando ${lottery.name} ---`);
 
-            // LIMPEZA AUTOMÁTICA: Se for rebuild, remove histórico antigo
-            if (rebuild) {
-                console.log('REBUILD MODE: Limpando histórico antigo...');
+            // 1. LIMPEZA AUTOMÁTICA: Se for rebuild, remove histórico antigo
+            if (isFullRebuild) {
+                console.log('🗑️ REBUILD MODE: Limpando histórico antigo...');
                 try {
                     const oldDraws = await base44.asServiceRole.entities.Draw.filter({
                         lottery_id: lottery.id
@@ -49,29 +49,23 @@ Deno.serve(async (req) => {
                 }
             }
 
-            // Get existing draws for this lottery
-            const existingDraws = await base44.asServiceRole.entities.Draw.filter({
-                lottery_id: lottery.id
-            });
-            const existingDatesSet = new Set(existingDraws.map(d => d.draw_date));
-            console.log('Existing draws:', existingDraws.length);
+            // 2. DEFINIÇÃO DO ALVO (Anos a procurar)
+            const currentYear = new Date().getFullYear();
+            const yearsToFetch = isFullRebuild 
+                ? [currentYear, currentYear - 1, currentYear - 2, currentYear - 3, 'anos anteriores']
+                : [currentYear];
+            
+            console.log('Períodos a buscar:', yearsToFetch);
 
             let allNewDraws = [];
 
-            // Fetch in 3 batches of ~17 draws each for better reliability
-            const batches = [
-                { label: 'últimos 17', count: 17 },
-                { label: '18-34', count: 17, offset: 17 },
-                { label: '35-50', count: 16, offset: 34 }
-            ];
-
-            for (const batch of batches) {
+            for (const period of yearsToFetch) {
+                console.log(`\n--- Buscando dados de ${lottery.name} para: ${period} ---`);
                 let prompt = '';
                 
                 if (lottery.name === 'EuroMilhões') {
-                    prompt = `Aceda ao site oficial jogossantacasa.pt e extraia os resultados REAIS do EuroMilhões.
-
-                DADOS NECESSÁRIOS: ${batch.count} sorteios ${batch.offset ? `(do ${batch.offset + 1}º ao ${batch.offset + batch.count}º mais recente)` : 'mais recentes'}
+                    prompt = `Aceda ao site oficial jogossantacasa.pt. 
+                Extraia os resultados REAIS do EuroMilhões referentes ao período: ${period}.
 
                 O EuroMilhões tem sorteios às TERÇAS e SEXTAS.
                 - 5 números principais de 1 a 50
@@ -79,19 +73,18 @@ Deno.serve(async (req) => {
 
                 FORMATO DE DATA OBRIGATÓRIO: YYYY-MM-DD (ex: 2026-01-28)
 
-                Retorne um JSON com array 'draws' contendo para CADA sorteio:
+                Retorne JSON estrito com array 'draws' contendo CADA sorteio:
                 {
                 "draw_date": "YYYY-MM-DD",
                 "main_numbers": [5 números inteiros de 1-50],
                 "extra_numbers": [2 números inteiros de 1-12]
                 }
 
-                CRÍTICO: Apenas dados oficiais verificados. JSON estritamente válido.`;
+                CRÍTICO: Apenas dados oficiais. Não invente resultados. JSON válido.`;
 
                 } else if (lottery.name === 'Totoloto') {
-                    prompt = `Aceda ao site oficial jogossantacasa.pt e extraia os resultados REAIS do Totoloto.
-
-                DADOS NECESSÁRIOS: ${batch.count} sorteios ${batch.offset ? `(do ${batch.offset + 1}º ao ${batch.offset + batch.count}º mais recente)` : 'mais recentes'}
+                    prompt = `Aceda ao site oficial jogossantacasa.pt. 
+                Extraia os resultados REAIS do Totoloto referentes ao período: ${period}.
 
                 O Totoloto tem sorteios às QUARTAS e SÁBADOS.
                 - 5 números principais de 1 a 49
@@ -99,19 +92,18 @@ Deno.serve(async (req) => {
 
                 FORMATO DE DATA OBRIGATÓRIO: YYYY-MM-DD (ex: 2026-01-28)
 
-                Retorne um JSON com array 'draws' contendo para CADA sorteio:
+                Retorne JSON estrito com array 'draws' contendo CADA sorteio:
                 {
                 "draw_date": "YYYY-MM-DD",
                 "main_numbers": [5 números inteiros de 1-49],
                 "extra_numbers": [1 número inteiro de 1-13]
                 }
 
-                CRÍTICO: Apenas dados oficiais verificados. JSON estritamente válido.`;
+                CRÍTICO: Apenas dados oficiais. Não invente resultados. JSON válido.`;
 
                 } else if (lottery.name === 'EuroDreams') {
-                    prompt = `Aceda ao site oficial jogossantacasa.pt e extraia os resultados REAIS do EuroDreams.
-
-                DADOS NECESSÁRIOS: ${batch.count} sorteios ${batch.offset ? `(do ${batch.offset + 1}º ao ${batch.offset + batch.count}º mais recente)` : 'mais recentes'}
+                    prompt = `Aceda ao site oficial jogossantacasa.pt. 
+                Extraia os resultados REAIS do EuroDreams referentes ao período: ${period}.
 
                 O EuroDreams tem sorteios às SEGUNDAS e QUINTAS.
                 - 6 números principais de 1 a 40
@@ -119,21 +111,21 @@ Deno.serve(async (req) => {
 
                 FORMATO DE DATA OBRIGATÓRIO: YYYY-MM-DD (ex: 2026-01-28)
 
-                Retorne um JSON com array 'draws' contendo para CADA sorteio:
+                Retorne JSON estrito com array 'draws' contendo CADA sorteio:
                 {
                 "draw_date": "YYYY-MM-DD",
                 "main_numbers": [6 números inteiros de 1-40],
                 "extra_numbers": [1 número inteiro de 1-5]
                 }
 
-                CRÍTICO: Apenas dados oficiais verificados. JSON estritamente válido.`;
+                CRÍTICO: Apenas dados oficiais. Não invente resultados. JSON válido.`;
                 } else {
                     continue;
                 }
 
                 try {
-                    console.log(`Fetching batch: ${batch.label}`);
-                    
+                    console.log(`Buscando IA para período: ${period}`);
+
                     const aiResponse = await base44.asServiceRole.integrations.Core.InvokeLLM({
                         prompt: prompt,
                         add_context_from_internet: true,
@@ -161,25 +153,22 @@ Deno.serve(async (req) => {
                         }
                     });
 
-                    console.log(`Batch ${batch.label} returned:`, aiResponse?.draws?.length || 0, 'draws');
+                    console.log(`Período ${period} retornou:`, aiResponse?.draws?.length || 0, 'sorteios');
 
                     if (aiResponse?.draws?.length > 0) {
                         for (const draw of aiResponse.draws) {
-                            // Validate
+                            // Validação
                             if (!draw.draw_date || !draw.main_numbers) continue;
                             if (!Array.isArray(draw.main_numbers)) continue;
                             if (draw.main_numbers.length !== lottery.main_count) continue;
-                            
+
                             // Check all numbers are valid integers
                             const validNumbers = draw.main_numbers.every(n => 
                                 Number.isInteger(n) && n >= lottery.main_min && n <= lottery.main_max
                             );
                             if (!validNumbers) continue;
 
-                            // Check if already exists by date
-                            if (existingDatesSet.has(draw.draw_date)) continue;
-
-                            // Check if already in our new draws list
+                            // Check if already in our new draws list (evita duplicados dentro do mesmo rebuild)
                             const alreadyAdded = allNewDraws.some(d => d.draw_date === draw.draw_date);
                             if (alreadyAdded) continue;
 
@@ -189,31 +178,29 @@ Deno.serve(async (req) => {
                                 main_numbers: draw.main_numbers.sort((a, b) => a - b),
                                 extra_numbers: (draw.extra_numbers || []).sort((a, b) => a - b)
                             });
-                            
-                            existingDatesSet.add(draw.draw_date);
                         }
                     }
-                } catch (batchError) {
-                    console.error(`Error in batch ${batch.label}:`, batchError.message);
+                } catch (periodError) {
+                    console.error(`Erro no período ${period}:`, periodError.message);
                 }
-            }
+                }
 
             // Bulk create new draws
             if (allNewDraws.length > 0) {
                 // Sort by date descending
                 allNewDraws.sort((a, b) => b.draw_date.localeCompare(a.draw_date));
-                
+
+                console.log(`📥 Inserindo ${allNewDraws.length} sorteios para ${lottery.name}...`);
                 await base44.asServiceRole.entities.Draw.bulkCreate(allNewDraws);
-                console.log(`Created ${allNewDraws.length} new draws for ${lottery.name}`);
+                console.log(`✓ ${allNewDraws.length} sorteios inseridos com sucesso`);
             }
 
             results.push({
                 lottery: lottery.name,
                 synced: allNewDraws.length,
-                existing: existingDraws.length,
                 message: allNewDraws.length > 0 
-                    ? `${allNewDraws.length} novo(s) sorteio(s)`
-                    : 'Base já atualizada'
+                    ? `${allNewDraws.length} novo(s) sorteio(s) importado(s)`
+                    : isFullRebuild ? 'Reconstrução concluída' : 'Base já atualizada'
             });
 
             // AUTO-VALIDATE SUGGESTIONS - Now checks ALL suggestions for this lottery
@@ -277,14 +264,14 @@ Deno.serve(async (req) => {
 
         return Response.json({
             success: true,
-            message: rebuild 
-                ? '✓ Base reconstruída com sucesso'
+            message: isFullRebuild 
+                ? `✓ Base reconstruída: ${totalSynced} sorteios importados por períodos`
                 : totalSynced > 0 
                     ? `✓ ${totalSynced} novo(s) sorteio(s) sincronizado(s)`
                     : '✓ Base de dados já atualizada',
             total_synced: totalSynced,
             results: results,
-            rebuild_mode: rebuild
+            rebuild_mode: isFullRebuild
         });
 
         } catch (error) {

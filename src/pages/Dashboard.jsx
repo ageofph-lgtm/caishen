@@ -103,36 +103,37 @@ export default function Dashboard() {
       };
 
       const handleFullRebuild = async () => {
-        if (!window.confirm("Isto irá apagar todo o histórico atual e buscar dados novos na Santa Casa. Continuar?")) return;
+        if (!window.confirm("Atenção: Isto irá apagar o histórico atual e reconstruir tudo via Santa Casa por períodos. Pode demorar alguns minutos. Deseja continuar?")) return;
 
         setIsSyncing(true);
-        setSyncMessage({ type: 'info', text: '⏳ Limpando base de dados e minerando resultados oficiais... Aguarde.' });
+        setSyncMessage({ type: 'info', text: '⏳ Limpando base de dados e reconstruindo histórico por períodos... Aguarde.' });
 
         try {
-          console.log('Iniciando reconstrução...');
+          console.log('🔄 Iniciando reconstrução completa por períodos...');
+          // Correção: Passar o objeto { rebuild: true } como segundo argumento
           const response = await base44.functions.invoke('syncSantaCasa', { rebuild: true });
-          console.log('Resposta recebida:', response.data);
+          console.log('✅ Resposta recebida:', response.data);
 
           if (response.data?.success) {
             setSyncMessage({ 
               type: 'success', 
-              text: `✓ ${response.data.message || 'Base reconstruída com sucesso!'}`
+              text: `✓ ${response.data.message || 'Base reconstruída com sucesso por períodos!'}`
             });
-            // Invalida todas as queries para forçar reload
+            // Invalida todas as queries para forçar reload dos dados
             queryClient.invalidateQueries();
           } else {
             const errorMsg = response.data?.error || response.data?.message || 'Erro desconhecido';
             throw new Error(errorMsg);
           }
         } catch (error) {
-          console.error('Erro na reconstrução:', error);
+          console.error('❌ Erro na reconstrução:', error);
           setSyncMessage({ 
             type: 'error', 
             text: 'Erro na reconstrução: ' + (error.message || 'Falha na comunicação com o servidor')
           });
         } finally {
           setIsSyncing(false);
-          setTimeout(() => setSyncMessage(null), 10000);
+          setTimeout(() => setSyncMessage(null), 12000);
         }
       };
 
