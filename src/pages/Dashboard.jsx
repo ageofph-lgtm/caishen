@@ -18,7 +18,6 @@ export default function Dashboard() {
   const [selectedLottery, setSelectedLottery] = useState(null);
   const [showDataPanel, setShowDataPanel] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [isRepopulating, setIsRepopulating] = useState(false);
   const [syncMessage, setSyncMessage] = useState(null);
 
   const queryClient = useQueryClient();
@@ -71,101 +70,37 @@ export default function Dashboard() {
     }
   }, [lotteries, selectedLottery]);
 
-  const handleSync = async (rebuild = false) => {
-        setIsSyncing(true);
-        setSyncMessage(null);
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    setSyncMessage({ type: 'info', text: '🔄 Atualizando resultados e validando sugestões...' });
 
-        try {
-          const response = await base44.functions.invoke('syncSantaCasa', { rebuild });
+    try {
+      const response = await base44.functions.invoke('syncLotteryDraws');
 
-          if (response.data.success) {
-            setSyncMessage({
-              type: 'success',
-              text: response.data.message
-            });
-            queryClient.invalidateQueries({ queryKey: ['draws'] });
-            queryClient.invalidateQueries({ queryKey: ['all-draws'] });
-          } else {
-            setSyncMessage({
-              type: 'error',
-              text: response.data.message || 'Erro desconhecido ao sincronizar.'
-            });
-          }
-        } catch (error) {
-          setSyncMessage({
-            type: 'error',
-            text: error.message || 'Erro ao sincronizar'
-          });
-        } finally {
-          setIsSyncing(false);
-          setTimeout(() => setSyncMessage(null), 5000);
-        }
-      };
-
-      const handleFullRebuild = async () => {
-        if (!window.confirm("Isto iniciará uma busca profunda ano a ano. O processo é demorado mas garante 100% dos dados. Continuar?")) return;
-
-        setIsSyncing(true);
-        setSyncMessage({ type: 'info', text: '⏳ Sincronização profunda iniciada. Buscando histórico ano a ano...' });
-
-        try {
-          console.log('🔄 Iniciando busca profunda por blocos anuais...');
-          const response = await base44.functions.invoke('syncSantaCasa', { rebuild: true });
-          console.log('✅ Resposta recebida:', response.data);
-
-          if (response.data?.success) {
-            setSyncMessage({ 
-              type: 'success', 
-              text: `✓ ${response.data.message || 'Sincronização profunda concluída! Os dados aparecerão gradualmente no Dashboard.'}`
-            });
-            // Invalida todas as queries para forçar reload dos dados
-            queryClient.invalidateQueries();
-          } else {
-            const errorMsg = response.data?.error || response.data?.message || 'Erro desconhecido';
-            throw new Error(errorMsg);
-          }
-        } catch (error) {
-          console.error('❌ Erro na sincronização:', error);
-          setSyncMessage({ 
-            type: 'error', 
-            text: 'Erro na sincronização: ' + (error.message || 'Falha na comunicação')
-          });
-        } finally {
-          setIsSyncing(false);
-          setTimeout(() => setSyncMessage(null), 12000);
-        }
-      };
-
-      const handleRepopulate = async () => {
-        setIsRepopulating(true);
-        setSyncMessage({ type: 'info', text: '⏳ Recuperando dados históricos... Isso pode demorar alguns minutos.' });
-
-        try {
-          const response = await base44.functions.invoke('repopulateDraws');
-
-          if (response.data.success) {
-            setSyncMessage({
-              type: 'success',
-              text: response.data.message
-            });
-            queryClient.invalidateQueries({ queryKey: ['draws'] });
-            queryClient.invalidateQueries({ queryKey: ['all-draws'] });
-          } else {
-            setSyncMessage({
-              type: 'error',
-              text: response.data.error || 'Erro ao recuperar dados.'
-            });
-          }
-        } catch (error) {
-          setSyncMessage({
-            type: 'error',
-            text: error.message || 'Erro ao recuperar'
-          });
-        } finally {
-          setIsRepopulating(false);
-          setTimeout(() => setSyncMessage(null), 10000);
-        }
-      };
+      if (response.data.success) {
+        setSyncMessage({
+          type: 'success',
+          text: response.data.message || 'Atualização completa!'
+        });
+        queryClient.invalidateQueries({ queryKey: ['draws'] });
+        queryClient.invalidateQueries({ queryKey: ['all-draws'] });
+        queryClient.invalidateQueries({ queryKey: ['suggestions'] });
+      } else {
+        setSyncMessage({
+          type: 'error',
+          text: response.data.error || 'Erro ao atualizar'
+        });
+      }
+    } catch (error) {
+      setSyncMessage({
+        type: 'error',
+        text: error.message || 'Erro ao atualizar'
+      });
+    } finally {
+      setIsSyncing(false);
+      setTimeout(() => setSyncMessage(null), 5000);
+    }
+  };
 
   const calculateFrequency = () => {
     const freqMap = {};
@@ -224,12 +159,12 @@ export default function Dashboard() {
 
             <Button
               variant="outline"
-              onClick={handleFullRebuild}
-              disabled={isSyncing || isRepopulating}
-              className="border-red-200 text-red-600 hover:bg-red-50"
+              onClick={handleManualSync}
+              disabled={isSyncing}
+              className="border-green-200 text-green-600 hover:bg-green-50"
             >
-              <Database className="w-4 h-4 mr-2" />
-              Reconstruir Base
+              <RefreshCw className={`w-4 h-4 mr-2 ${isSyncing ? 'animate-spin' : ''}`} />
+              Atualizar Resultados
             </Button>
 
             <Button
