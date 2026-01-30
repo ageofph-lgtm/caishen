@@ -12,17 +12,16 @@ Deno.serve(async (req) => {
             return Response.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
-        // Calculate start of this week (Monday)
+        // Calculate last 7 days
         const today = new Date();
         const todayStr = today.toISOString().split('T')[0];
         const dayOfWeek = today.getDay();
-        const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-        const monday = new Date(today);
-        monday.setDate(today.getDate() + diff);
-        const startOfWeek = monday.toISOString().split('T')[0];
+        const sevenDaysAgo = new Date(today);
+        sevenDaysAgo.setDate(today.getDate() - 7);
+        const startDate = sevenDaysAgo.toISOString().split('T')[0];
 
         console.log('Today:', todayStr, '- Day of week:', dayOfWeek);
-        console.log('Start of this week:', startOfWeek);
+        console.log('Searching from:', startDate, 'to:', todayStr);
 
         // Get all active lotteries
         const lotteries = await base44.asServiceRole.entities.Lottery.filter({ is_active: true });
@@ -34,13 +33,13 @@ Deno.serve(async (req) => {
             console.log(`\n--- Syncing ${lottery.name} ---`);
 
             try {
-                // Get existing draws from this week only
+                // Get existing draws from last 7 days
                 const existingDraws = await base44.asServiceRole.entities.Draw.filter(
                     { lottery_id: lottery.id }
                 );
 
-                const thisWeekDraws = existingDraws.filter(d => d.draw_date >= startOfWeek);
-                console.log('Existing draws this week:', thisWeekDraws.length);
+                const recentDraws = existingDraws.filter(d => d.draw_date >= startDate);
+                console.log('Existing draws (last 7 days):', recentDraws.length);
 
                 // Build prompt based on lottery
                 let prompt = '';
@@ -50,11 +49,11 @@ Deno.serve(async (req) => {
                     drawDays = 'TERÇAS e SEXTAS-FEIRAS';
                     prompt = `HOJE É ${todayStr} (${dayOfWeek === 2 ? 'TERÇA' : dayOfWeek === 5 ? 'SEXTA' : dayOfWeek === 1 ? 'SEGUNDA' : dayOfWeek === 3 ? 'QUARTA' : dayOfWeek === 4 ? 'QUINTA' : dayOfWeek === 6 ? 'SÁBADO' : 'DOMINGO'}).
 
-SEMANA ATUAL: de ${startOfWeek} até ${todayStr}
+PERÍODO: de ${startDate} até ${todayStr} (últimos 7 dias)
 
 O EuroMilhões tem sorteios às ${drawDays}.
 
-TAREFA: Busque TODOS os sorteios do EuroMilhões desta semana (${startOfWeek} até ${todayStr}).
+TAREFA: Busque TODOS os sorteios do EuroMilhões dos últimos 7 dias (${startDate} até ${todayStr}).
 
 Procure em:
 - jogossantacasa.pt/web/SCCartazResult/
@@ -69,11 +68,11 @@ IMPORTANTE:
                     drawDays = 'QUARTAS e SÁBADOS';
                     prompt = `HOJE É ${todayStr} (${dayOfWeek === 2 ? 'TERÇA' : dayOfWeek === 5 ? 'SEXTA' : dayOfWeek === 1 ? 'SEGUNDA' : dayOfWeek === 3 ? 'QUARTA' : dayOfWeek === 4 ? 'QUINTA' : dayOfWeek === 6 ? 'SÁBADO' : 'DOMINGO'}).
 
-SEMANA ATUAL: de ${startOfWeek} até ${todayStr}
+PERÍODO: de ${startDate} até ${todayStr} (últimos 7 dias)
 
 O Totoloto tem sorteios às ${drawDays}.
 
-TAREFA: Busque TODOS os sorteios do Totoloto desta semana (${startOfWeek} até ${todayStr}).
+TAREFA: Busque TODOS os sorteios do Totoloto dos últimos 7 dias (${startDate} até ${todayStr}).
 
 Procure em:
 - jogossantacasa.pt/web/SCCartazResult/
@@ -88,11 +87,11 @@ IMPORTANTE:
                     drawDays = 'SEGUNDAS e QUINTAS-FEIRAS';
                     prompt = `HOJE É ${todayStr} (${dayOfWeek === 2 ? 'TERÇA' : dayOfWeek === 5 ? 'SEXTA' : dayOfWeek === 1 ? 'SEGUNDA' : dayOfWeek === 3 ? 'QUARTA' : dayOfWeek === 4 ? 'QUINTA' : dayOfWeek === 6 ? 'SÁBADO' : 'DOMINGO'}).
 
-SEMANA ATUAL: de ${startOfWeek} até ${todayStr}
+PERÍODO: de ${startDate} até ${todayStr} (últimos 7 dias)
 
 O EuroDreams tem sorteios às ${drawDays}.
 
-TAREFA: Busque TODOS os sorteios do EuroDreams desta semana (${startOfWeek} até ${todayStr}).
+TAREFA: Busque TODOS os sorteios do EuroDreams dos últimos 7 dias (${startDate} até ${todayStr}).
 
 Procure em:
 - Sites oficiais de loterias europeias
@@ -153,9 +152,9 @@ IMPORTANTE:
                     if (!Array.isArray(draw.main_numbers)) continue;
                     if (draw.main_numbers.length !== lottery.main_count) continue;
                     
-                    // Only accept draws from this week
-                    if (draw.draw_date < startOfWeek || draw.draw_date > todayStr) {
-                        console.log('Skipping draw outside this week:', draw.draw_date);
+                    // Only accept draws from last 7 days
+                    if (draw.draw_date < startDate || draw.draw_date > todayStr) {
+                        console.log('Skipping draw outside date range:', draw.draw_date);
                         continue;
                     }
 
@@ -163,7 +162,7 @@ IMPORTANTE:
                     if (!allIntegers) continue;
 
                     // Check if this exact draw already exists
-                    const isDuplicate = thisWeekDraws.some(existing => {
+                    const isDuplicate = recentDraws.some(existing => {
                         if (existing.draw_date !== draw.draw_date) return false;
                         
                         const existingMain = JSON.stringify([...existing.main_numbers].sort());
@@ -276,7 +275,7 @@ IMPORTANTE:
 
         const message = totalSynced > 0 
             ? `✓ ${totalSynced} novo(s) sorteio(s) sincronizado(s)${validationResult.validated > 0 ? ` • ${validationResult.validated} sugestões validadas com ${validationResult.total_matches} acertos` : ''}` 
-            : `✓ Todos os sorteios da semana já estão na base`;
+            : `✓ Todos os sorteios dos últimos 7 dias já estão na base`;
 
         return Response.json({
             success: true,
