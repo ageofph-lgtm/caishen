@@ -129,9 +129,23 @@ Deno.serve(async (req) => {
             // Filtra duplicados dentro do próprio ficheiro
             const uniqueDraws = Array.from(new Map(drawsToSave.map(item => [item.draw_date, item])).values());
 
+            // Verifica quais draws já existem na base de dados
+            const existingDraws = await base44.asServiceRole.entities.Draw.filter({ lottery_id: lotteryId });
+            const existingDates = new Set(existingDraws.map(d => d.draw_date));
+
+            // Filtra apenas draws novos
+            const newDraws = uniqueDraws.filter(d => !existingDates.has(d.draw_date));
+
+            if (newDraws.length === 0) {
+                return Response.json({ 
+                    success: false, 
+                    error: "Todos os sorteios já existem na base de dados." 
+                });
+            }
+
             const batchSize = 50;
-            for (let i = 0; i < uniqueDraws.length; i += batchSize) {
-                await base44.asServiceRole.entities.Draw.bulkCreate(uniqueDraws.slice(i, i + batchSize));
+            for (let i = 0; i < newDraws.length; i += batchSize) {
+                await base44.asServiceRole.entities.Draw.bulkCreate(newDraws.slice(i, i + batchSize));
             }
 
             // Atualiza estatísticas
