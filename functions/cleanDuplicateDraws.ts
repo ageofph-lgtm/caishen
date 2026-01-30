@@ -29,9 +29,17 @@ Deno.serve(async (req) => {
         console.log(`Draws únicos: ${uniqueDraws.size}`);
         console.log(`Duplicados a apagar: ${toDelete.length}`);
         
-        // Deleta os duplicados
-        for (const drawId of toDelete) {
-            await base44.asServiceRole.entities.Draw.delete(drawId);
+        // Deleta os duplicados em lotes
+        const batchSize = 50;
+        for (let i = 0; i < toDelete.length; i += batchSize) {
+            const batch = toDelete.slice(i, i + batchSize);
+            await Promise.all(batch.map(id => base44.asServiceRole.entities.Draw.delete(id)));
+            console.log(`Deletados ${Math.min(i + batchSize, toDelete.length)}/${toDelete.length}`);
+            
+            // Pausa entre lotes
+            if (i + batchSize < toDelete.length) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
         }
         
         // Remove duplicata da loteria EuroDreams
