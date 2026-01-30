@@ -153,7 +153,7 @@ Deno.serve(async (req) => {
 
             return Response.json({ 
                 success: true, 
-                message: `Sucesso! ${uniqueDraws.length} sorteios importados em ${lotteryName}.` 
+                message: `Sucesso! ${newDraws.length} sorteios novos importados em ${lotteryName}.` 
             });
         }
 
