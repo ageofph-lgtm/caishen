@@ -63,13 +63,18 @@ Deno.serve(async (req) => {
         console.log('Sorteios duplicados encontrados:', drawsToDelete.length);
         console.log('Sorteios únicos:', drawMap.size);
 
-        // Delete em lotes de 100 (mais rápido)
+        // Delete em lotes de 100 (mais rápido, ignora erros)
         const batchSize = 100;
+        let deletedCount = 0;
         for (let i = 0; i < drawsToDelete.length; i += batchSize) {
             const batch = drawsToDelete.slice(i, i + batchSize);
-            await Promise.all(batch.map(id => base44.asServiceRole.entities.Draw.delete(id)));
-            console.log(`✓ Deletados ${i + batch.length}/${drawsToDelete.length}`);
+            const results = await Promise.allSettled(
+                batch.map(id => base44.asServiceRole.entities.Draw.delete(id))
+            );
+            deletedCount += results.filter(r => r.status === 'fulfilled').length;
+            console.log(`✓ Deletados ${deletedCount}/${drawsToDelete.length}`);
         }
+        console.log(`Total removido com sucesso: ${deletedCount}`);
 
         console.log('✓ Limpeza concluída');
         return Response.json({ 
