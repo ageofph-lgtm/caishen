@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { base44 } from '@/api/base44Client';
@@ -47,10 +46,57 @@ export default function SuggestionsHistory() {
 
   const validateMutation = useMutation({
     mutationFn: async () => {
-      console.log('Starting validation...');
-      const response = await base44.functions.invoke('validateSuggestions');
-      console.log('Validation response:', response);
-      return response.data;
+      if (!selectedLottery) {
+        throw new Error('Selecione uma loteria');
+      }
+
+      // Buscar a última sugestão não validada desta loteria
+      const pendingSuggestion = suggestions
+        .filter(s => !s.was_validated)
+        .sort((a, b) => new Date(b.created_date) - new Date(a.created_date))[0];
+
+      if (!pendingSuggestion) {
+        throw new Error('Nenhuma sugestão pendente para validar');
+      }
+
+      // Buscar o último sorteio desta loteria
+      const draws = await base44.entities.Draw.filter(
+        { lottery_id: selectedLottery },
+        '-draw_date',
+        1
+      );
+
+      if (draws.length === 0) {
+        throw new Error('Nenhum sorteio encontrado para esta loteria');
+      }
+
+      const latestDraw = draws[0];
+
+      // Calcular acertos
+      const matchesMain = pendingSuggestion.main_numbers.filter(num =>
+        latestDraw.main_numbers.includes(num)
+      ).length;
+
+      const matchesExtra = (pendingSuggestion.extra_numbers || []).filter(num =>
+        (latestDraw.extra_numbers || []).includes(num)
+      ).length;
+
+      // Atualizar a sugestão
+      await base44.entities.Suggestion.update(pendingSuggestion.id, {
+        actual_main_numbers: latestDraw.main_numbers,
+        actual_extra_numbers: latestDraw.extra_numbers || [],
+        matches_main: matchesMain,
+        matches_extra: matchesExtra,
+        was_validated: true,
+        draw_date: latestDraw.draw_date
+      });
+
+      return {
+        success: true,
+        message: `✓ Sugestão validada: ${matchesMain} acertos principais, ${matchesExtra} acertos extras`,
+        matches_main: matchesMain,
+        matches_extra: matchesExtra
+      };
     },
     onSuccess: (data) => {
       console.log('Validation success:', data);
