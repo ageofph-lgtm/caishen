@@ -62,14 +62,14 @@ export default function Generator() {
     }
   });
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (lotteries.length > 0 && !selectedLottery) {
       setSelectedLottery(lotteries[0].id);
     }
   }, [lotteries, selectedLottery]);
 
   // ANÁLISE DE FEEDBACK CONTÍNUO E CORREÇÃO DE ERRO
-  React.useEffect(() => {
+  useEffect(() => {
     if (validatedSuggestions.length > 0) {
       const lastSuggestion = validatedSuggestions[0];
       const matches = lastSuggestion.matches_main || 0;
