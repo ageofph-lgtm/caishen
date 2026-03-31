@@ -11,7 +11,7 @@ Deno.serve(async (req) => {
         const today = new Date();
         const todayStr = today.toISOString().split('T')[0];
         const lookback = new Date(today);
-        lookback.setDate(today.getDate() - 10);
+        lookback.setDate(today.getDate() - 30);
         const startDate = lookback.toISOString().split('T')[0];
 
         console.log(`Window: ${startDate} → ${todayStr}`);
@@ -55,12 +55,11 @@ Deno.serve(async (req) => {
             }
             if (cleanedCount > 0) console.log(`Total cleaned: ${cleanedCount} duplicates`);
 
-            // 2. Build set of dates AND number combos already in DB for this lottery
+            // 2. Build set of dates already in DB for this lottery
             const freshDraws = await base44.asServiceRole.entities.Draw.filter({ lottery_id: lottery.id });
             const existingDates = new Set(freshDraws.map(d => d.draw_date));
-            const existingCombos = new Set(freshDraws.map(d => [...d.main_numbers].sort((a,b)=>a-b).join(',')));
             const recentExisting = freshDraws.filter(d => d.draw_date >= startDate);
-            console.log(`Existing dates in DB: ${existingDates.size} total, ${recentExisting.length} in window, ${existingCombos.size} unique combos`);
+            console.log(`Existing dates in DB: ${existingDates.size} total, ${recentExisting.length} in window`);
 
             // 3. Build lottery-specific config
             let config = {};
@@ -86,7 +85,7 @@ Deno.serve(async (req) => {
                     mainCount: 6, mainMin: 1, mainMax: 40,
                     extraCount: 1, extraMin: 1, extraMax: 5,
                     extraName: 'número Dream',
-                    source: 'jogossantacasa.pt EuroDreams'
+                    source: 'eurodreams.com ou loteriasyapuestas.com/eurodreams'
                 };
             } else {
                 console.log(`Unknown lottery: ${lottery.name}, skipping`);
@@ -97,23 +96,23 @@ Deno.serve(async (req) => {
             const existingInWindow = recentExisting.map(d => d.draw_date).join(', ') || 'nenhuma';
 
             const prompt = `
-Hoje é ${todayStr}. Preciso dos resultados OFICIAIS e EXATOS da loteria ${lottery.name} (Portugal / Santa Casa).
+Hoje é ${todayStr}. Preciso dos resultados OFICIAIS, REAIS e VERIFICADOS da loteria ${lottery.name}.
 
-A ${lottery.name} realiza sorteios às ${config.drawDays}.
+A ${lottery.name} realiza sorteios APENAS às ${config.drawDays}. NÃO inventes sorteios em dias que não sejam esses.
 
-JANELA DE PESQUISA: De ${startDate} até HOJE (${todayStr}).
+JANELA DE PESQUISA: De ${startDate} até ${todayStr}.
 
-Já tenho os resultados das seguintes datas (NÃO preciso delas): ${existingInWindow}
+Já tenho os resultados das seguintes datas (NÃO me dês estas): ${existingInWindow}
 
-INSTRUÇÕES CRÍTICAS:
-- Retorna APENAS os sorteios que ocorreram na janela ${startDate} a ${todayStr}.
-- Retorna APENAS datas para as quais ainda NÃO tenho resultados.
-- Cada sorteio tem EXATAMENTE ${config.mainCount} números principais (entre ${config.mainMin} e ${config.mainMax}) e ${config.extraCount} ${config.extraName} (entre ${config.extraMin} e ${config.extraMax}).
-- Os números devem ser os REAIS e VERIFICADOS. NÃO inventes números.
+REGRAS ABSOLUTAS:
+- APENAS datas que correspondam a ${config.drawDays}.
+- Cada sorteio tem EXATAMENTE ${config.mainCount} números principais DIFERENTES entre ${config.mainMin} e ${config.mainMax}.
+- Cada sorteio tem EXATAMENTE ${config.extraCount} ${config.extraName} entre ${config.extraMin} e ${config.extraMax}.
+- Os números devem ser os REAIS verificados em fontes oficiais. NÃO REPITAS combinações de sorteios anteriores.
 - Formato de data: YYYY-MM-DD.
-- Se não tens dados verificados para uma data, NÃO a incluas no resultado.
+- Se não tiveres dados verificados para uma data, NÃO a incluas.
 - Fonte de referência: ${config.source}
-- Se não houver nenhum sorteio novo disponível, retorna array vazio.
+- Se não houver sorteios novos verificados, retorna array vazio.
 `.trim();
 
             console.log('Querying LLM with internet for:', lottery.name);
@@ -182,13 +181,6 @@ INSTRUÇÕES CRÍTICAS:
                     continue;
                 }
 
-                // Skip if exact same number combo already exists (LLM hallucination guard)
-                const combo = [...mainNums].sort((a,b)=>a-b).join(',');
-                if (existingCombos.has(combo)) {
-                    console.log(`Number combo already exists for another date, skipping: ${draw.draw_date} [${combo}]`);
-                    continue;
-                }
-
                 // Validate extra numbers
                 const extraNums = (draw.extra_numbers || []).map(n => parseInt(n)).filter(n => !isNaN(n));
                 if (config.extraCount > 0 && extraNums.length !== config.extraCount) {
@@ -202,7 +194,6 @@ INSTRUÇÕES CRÍTICAS:
 
                 console.log(`✓ Valid draw: ${draw.draw_date} | main: ${mainNums} | extra: ${extraNums}`);
                 existingDates.add(draw.draw_date); // prevent double-insert within same batch
-                existingCombos.add(combo); // prevent same combo in same batch
             }
 
             if (toInsert.length > 0) {
