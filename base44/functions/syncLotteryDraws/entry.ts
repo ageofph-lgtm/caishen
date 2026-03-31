@@ -55,11 +55,12 @@ Deno.serve(async (req) => {
             }
             if (cleanedCount > 0) console.log(`Total cleaned: ${cleanedCount} duplicates`);
 
-            // 2. Build set of dates already in DB for this lottery
+            // 2. Build set of dates AND number combos already in DB for this lottery
             const freshDraws = await base44.asServiceRole.entities.Draw.filter({ lottery_id: lottery.id });
             const existingDates = new Set(freshDraws.map(d => d.draw_date));
+            const existingCombos = new Set(freshDraws.map(d => [...d.main_numbers].sort((a,b)=>a-b).join(',')));
             const recentExisting = freshDraws.filter(d => d.draw_date >= startDate);
-            console.log(`Existing dates in DB: ${existingDates.size} total, ${recentExisting.length} in window`);
+            console.log(`Existing dates in DB: ${existingDates.size} total, ${recentExisting.length} in window, ${existingCombos.size} unique combos`);
 
             // 3. Build lottery-specific config
             let config = {};
@@ -160,7 +161,7 @@ INSTRUÇÕES CRÍTICAS:
                     continue;
                 }
 
-                // KEY FIX: Skip if date already exists (dedup by DATE ONLY)
+                // Skip if date already exists
                 if (existingDates.has(draw.draw_date)) {
                     console.log(`Date already exists, skipping: ${draw.draw_date}`);
                     continue;
@@ -181,6 +182,13 @@ INSTRUÇÕES CRÍTICAS:
                     continue;
                 }
 
+                // Skip if exact same number combo already exists (LLM hallucination guard)
+                const combo = [...mainNums].sort((a,b)=>a-b).join(',');
+                if (existingCombos.has(combo)) {
+                    console.log(`Number combo already exists for another date, skipping: ${draw.draw_date} [${combo}]`);
+                    continue;
+                }
+
                 // Validate extra numbers
                 const extraNums = (draw.extra_numbers || []).map(n => parseInt(n)).filter(n => !isNaN(n));
                 if (config.extraCount > 0 && extraNums.length !== config.extraCount) {
@@ -194,12 +202,7 @@ INSTRUÇÕES CRÍTICAS:
 
                 console.log(`✓ Valid draw: ${draw.draw_date} | main: ${mainNums} | extra: ${extraNums}`);
                 existingDates.add(draw.draw_date); // prevent double-insert within same batch
-                toInsert.push({
-                    lottery_id: lottery.id,
-                    draw_date: draw.draw_date,
-                    main_numbers: mainNums.sort((a, b) => a - b),
-                    extra_numbers: extraNums.sort((a, b) => a - b)
-                });
+                existingCombos.add(combo); // prevent same combo in same batch
             }
 
             if (toInsert.length > 0) {
