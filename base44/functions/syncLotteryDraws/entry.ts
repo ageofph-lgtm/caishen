@@ -1,298 +1,279 @@
-import { createClientFromRequest } from 'npm:@base44/sdk@0.7.1';
+import { createClientFromRequest } from 'npm:@base44/sdk@0.8.23';
 
 Deno.serve(async (req) => {
     try {
-        console.log('=== SYNC ALL LOTTERIES STARTED ===');
-        
+        console.log('=== SYNC STARTED ===');
+
         const base44 = createClientFromRequest(req);
         const user = await base44.auth.me();
+        if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-        if (!user) {
-            console.log('ERROR: Unauthorized');
-            return Response.json({ error: 'Unauthorized' }, { status: 401 });
-        }
-
-        // Calculate last 7 days
         const today = new Date();
         const todayStr = today.toISOString().split('T')[0];
-        const dayOfWeek = today.getDay();
-        const sevenDaysAgo = new Date(today);
-        sevenDaysAgo.setDate(today.getDate() - 7);
-        const startDate = sevenDaysAgo.toISOString().split('T')[0];
+        const lookback = new Date(today);
+        lookback.setDate(today.getDate() - 10);
+        const startDate = lookback.toISOString().split('T')[0];
 
-        console.log('Today:', todayStr, '- Day of week:', dayOfWeek);
-        console.log('Searching from:', startDate, 'to:', todayStr);
+        console.log(`Window: ${startDate} → ${todayStr}`);
 
-        // Get all active lotteries
         const lotteries = await base44.asServiceRole.entities.Lottery.filter({ is_active: true });
-        console.log('Found lotteries:', lotteries.length);
+
+        // Deduplicate lotteries by name (keep one per name)
+        const uniqueLotteries = [];
+        const seenNames = new Set();
+        for (const l of lotteries) {
+            if (!seenNames.has(l.name)) {
+                seenNames.add(l.name);
+                uniqueLotteries.push(l);
+            }
+        }
+        console.log(`Processing ${uniqueLotteries.length} unique lotteries`);
 
         const results = [];
 
-        for (const lottery of lotteries) {
-            console.log(`\n--- Syncing ${lottery.name} ---`);
+        for (const lottery of uniqueLotteries) {
+            console.log(`\n--- ${lottery.name} ---`);
 
-            try {
-                // Get existing draws from last 7 days
-                const existingDraws = await base44.asServiceRole.entities.Draw.filter(
-                    { lottery_id: lottery.id }
-                );
-
-                const recentDraws = existingDraws.filter(d => d.draw_date >= startDate);
-                console.log('Existing draws (last 7 days):', recentDraws.length);
-
-                // Build prompt based on lottery
-                let prompt = '';
-                let drawDays = '';
-                
-                if (lottery.name === 'EuroMilhões') {
-                    drawDays = 'TERÇAS e SEXTAS-FEIRAS';
-                    prompt = `HOJE É ${todayStr} (${dayOfWeek === 2 ? 'TERÇA' : dayOfWeek === 5 ? 'SEXTA' : dayOfWeek === 1 ? 'SEGUNDA' : dayOfWeek === 3 ? 'QUARTA' : dayOfWeek === 4 ? 'QUINTA' : dayOfWeek === 6 ? 'SÁBADO' : 'DOMINGO'}).
-
-PERÍODO: de ${startDate} até ${todayStr} (últimos 7 dias)
-
-O EuroMilhões tem sorteios às ${drawDays}.
-
-TAREFA: Busque TODOS os sorteios do EuroMilhões dos últimos 7 dias (${startDate} até ${todayStr}).
-
-Procure em:
-- jogossantacasa.pt/web/SCCartazResult/
-- Sites oficiais
-
-IMPORTANTE:
-- Retorne TODOS os sorteios desta semana
-- Formato de data: YYYY-MM-DD
-- 5 números principais (1 a 50)
-- 2 estrelas (1 a 12)`;
-                } else if (lottery.name === 'Totoloto') {
-                    drawDays = 'QUARTAS e SÁBADOS';
-                    prompt = `HOJE É ${todayStr} (${dayOfWeek === 2 ? 'TERÇA' : dayOfWeek === 5 ? 'SEXTA' : dayOfWeek === 1 ? 'SEGUNDA' : dayOfWeek === 3 ? 'QUARTA' : dayOfWeek === 4 ? 'QUINTA' : dayOfWeek === 6 ? 'SÁBADO' : 'DOMINGO'}).
-
-PERÍODO: de ${startDate} até ${todayStr} (últimos 7 dias)
-
-O Totoloto tem sorteios às ${drawDays}.
-
-TAREFA: Busque TODOS os sorteios do Totoloto dos últimos 7 dias (${startDate} até ${todayStr}).
-
-Procure em:
-- jogossantacasa.pt/web/SCCartazResult/
-- Sites oficiais
-
-IMPORTANTE:
-- Retorne TODOS os sorteios desta semana
-- Formato de data: YYYY-MM-DD
-- 5 números principais (1 a 49)
-- 1 número da sorte (1 a 13)`;
-                } else if (lottery.name === 'EuroDreams') {
-                    drawDays = 'SEGUNDAS e QUINTAS-FEIRAS';
-                    prompt = `HOJE É ${todayStr} (${dayOfWeek === 2 ? 'TERÇA' : dayOfWeek === 5 ? 'SEXTA' : dayOfWeek === 1 ? 'SEGUNDA' : dayOfWeek === 3 ? 'QUARTA' : dayOfWeek === 4 ? 'QUINTA' : dayOfWeek === 6 ? 'SÁBADO' : 'DOMINGO'}).
-
-PERÍODO: de ${startDate} até ${todayStr} (últimos 7 dias)
-
-O EuroDreams tem sorteios às ${drawDays}.
-
-TAREFA: Busque TODOS os sorteios do EuroDreams dos últimos 7 dias (${startDate} até ${todayStr}).
-
-Procure em:
-- Sites oficiais de loterias europeias
-- jogossantacasa.pt
-
-IMPORTANTE:
-- Retorne TODOS os sorteios desta semana
-- Formato de data: YYYY-MM-DD
-- 6 números principais (1 a 40)
-- 1 número Dream (1 a 5)`;
+            // 1. CLEANUP: Remove duplicate draws (same lottery_id + draw_date, keep newest)
+            const allExistingDraws = await base44.asServiceRole.entities.Draw.filter({ lottery_id: lottery.id });
+            const dateGroups = {};
+            for (const draw of allExistingDraws) {
+                if (!dateGroups[draw.draw_date]) dateGroups[draw.draw_date] = [];
+                dateGroups[draw.draw_date].push(draw);
+            }
+            let cleanedCount = 0;
+            for (const [date, draws] of Object.entries(dateGroups)) {
+                if (draws.length > 1) {
+                    // Keep the one with the most recent created_date, delete the rest
+                    draws.sort((a, b) => new Date(b.created_date) - new Date(a.created_date));
+                    for (let i = 1; i < draws.length; i++) {
+                        await base44.asServiceRole.entities.Draw.delete(draws[i].id);
+                        cleanedCount++;
+                    }
+                    console.log(`Cleaned ${draws.length - 1} duplicate(s) for date ${date}`);
                 }
+            }
+            if (cleanedCount > 0) console.log(`Total cleaned: ${cleanedCount} duplicates`);
 
-                console.log('Calling AI for this week results...');
+            // 2. Build set of dates already in DB for this lottery
+            const freshDraws = await base44.asServiceRole.entities.Draw.filter({ lottery_id: lottery.id });
+            const existingDates = new Set(freshDraws.map(d => d.draw_date));
+            const recentExisting = freshDraws.filter(d => d.draw_date >= startDate);
+            console.log(`Existing dates in DB: ${existingDates.size} total, ${recentExisting.length} in window`);
 
-                const aiResponse = await base44.asServiceRole.integrations.Core.InvokeLLM({
-                    prompt: prompt,
-                    add_context_from_internet: true,
-                    response_json_schema: {
-                        type: "object",
-                        properties: {
-                            draws: {
-                                type: "array",
-                                items: {
-                                    type: "object",
-                                    properties: {
-                                        draw_date: { type: "string" },
-                                        main_numbers: {
-                                            type: "array",
-                                            items: { type: "integer" }
-                                        },
-                                        extra_numbers: {
-                                            type: "array",
-                                            items: { type: "integer" }
-                                        }
-                                    }
-                                }
+            // 3. Build lottery-specific config
+            let config = {};
+            if (lottery.name === 'EuroMilhões') {
+                config = {
+                    drawDays: 'terças-feiras e sextas-feiras',
+                    mainCount: 5, mainMin: 1, mainMax: 50,
+                    extraCount: 2, extraMin: 1, extraMax: 12,
+                    extraName: 'estrelas',
+                    source: 'jogossantacasa.pt EuroMilhões'
+                };
+            } else if (lottery.name === 'Totoloto') {
+                config = {
+                    drawDays: 'quartas-feiras e sábados',
+                    mainCount: 5, mainMin: 1, mainMax: 49,
+                    extraCount: 1, extraMin: 1, extraMax: 13,
+                    extraName: 'número da sorte',
+                    source: 'jogossantacasa.pt Totoloto'
+                };
+            } else if (lottery.name === 'EuroDreams') {
+                config = {
+                    drawDays: 'segundas-feiras e quintas-feiras',
+                    mainCount: 6, mainMin: 1, mainMax: 40,
+                    extraCount: 1, extraMin: 1, extraMax: 5,
+                    extraName: 'número Dream',
+                    source: 'jogossantacasa.pt EuroDreams'
+                };
+            } else {
+                console.log(`Unknown lottery: ${lottery.name}, skipping`);
+                continue;
+            }
+
+            // 4. Already-existing dates in window (to tell the LLM which ones we DON'T need)
+            const existingInWindow = recentExisting.map(d => d.draw_date).join(', ') || 'nenhuma';
+
+            const prompt = `
+Hoje é ${todayStr}. Preciso dos resultados OFICIAIS e EXATOS da loteria ${lottery.name} (Portugal / Santa Casa).
+
+A ${lottery.name} realiza sorteios às ${config.drawDays}.
+
+JANELA DE PESQUISA: De ${startDate} até HOJE (${todayStr}).
+
+Já tenho os resultados das seguintes datas (NÃO preciso delas): ${existingInWindow}
+
+INSTRUÇÕES CRÍTICAS:
+- Retorna APENAS os sorteios que ocorreram na janela ${startDate} a ${todayStr}.
+- Retorna APENAS datas para as quais ainda NÃO tenho resultados.
+- Cada sorteio tem EXATAMENTE ${config.mainCount} números principais (entre ${config.mainMin} e ${config.mainMax}) e ${config.extraCount} ${config.extraName} (entre ${config.extraMin} e ${config.extraMax}).
+- Os números devem ser os REAIS e VERIFICADOS. NÃO inventes números.
+- Formato de data: YYYY-MM-DD.
+- Se não tens dados verificados para uma data, NÃO a incluas no resultado.
+- Fonte de referência: ${config.source}
+- Se não houver nenhum sorteio novo disponível, retorna array vazio.
+`.trim();
+
+            console.log('Querying LLM with internet for:', lottery.name);
+
+            const aiResponse = await base44.asServiceRole.integrations.Core.InvokeLLM({
+                prompt,
+                add_context_from_internet: true,
+                model: 'gemini_3_flash',
+                response_json_schema: {
+                    type: 'object',
+                    properties: {
+                        draws: {
+                            type: 'array',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    draw_date: { type: 'string', description: 'YYYY-MM-DD' },
+                                    main_numbers: { type: 'array', items: { type: 'integer' } },
+                                    extra_numbers: { type: 'array', items: { type: 'integer' } }
+                                },
+                                required: ['draw_date', 'main_numbers']
                             }
                         }
                     }
-                });
+                }
+            });
 
-                console.log('AI Response received');
-                console.log('Draws found:', aiResponse?.draws?.length || 0);
+            const rawDraws = aiResponse?.draws || [];
+            console.log(`LLM returned ${rawDraws.length} draw(s)`);
 
-                if (!aiResponse || !aiResponse.draws || aiResponse.draws.length === 0) {
-                    results.push({
-                        lottery: lottery.name,
-                        synced: 0,
-                        message: 'Nenhum sorteio encontrado'
-                    });
+            const toInsert = [];
+
+            for (const draw of rawDraws) {
+                if (!draw.draw_date || !draw.main_numbers) continue;
+
+                // Validate date format
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(draw.draw_date)) {
+                    console.log(`Invalid date format: ${draw.draw_date}`);
                     continue;
                 }
 
-                // Validate draws
-                const validDraws = [];
-                for (const draw of aiResponse.draws) {
-                    if (!draw.draw_date || !draw.main_numbers) continue;
-                    if (!Array.isArray(draw.main_numbers)) continue;
-                    if (draw.main_numbers.length !== lottery.main_count) continue;
-                    
-                    // Only accept draws from last 7 days
-                    if (draw.draw_date < startDate || draw.draw_date > todayStr) {
-                        console.log('Skipping draw outside date range:', draw.draw_date);
-                        continue;
-                    }
-
-                    const allIntegers = draw.main_numbers.every(n => Number.isInteger(n));
-                    if (!allIntegers) continue;
-
-                    // Check if this exact draw already exists
-                    const isDuplicate = recentDraws.some(existing => {
-                        if (existing.draw_date !== draw.draw_date) return false;
-                        
-                        const existingMain = JSON.stringify([...existing.main_numbers].sort());
-                        const newMain = JSON.stringify([...draw.main_numbers].sort());
-                        
-                        return existingMain === newMain;
-                    });
-
-                    if (isDuplicate) {
-                        console.log('Skipping duplicate draw from', draw.draw_date);
-                        continue;
-                    }
-
-                    validDraws.push({
-                        lottery_id: lottery.id,
-                        draw_date: draw.draw_date,
-                        main_numbers: draw.main_numbers,
-                        extra_numbers: draw.extra_numbers || []
-                    });
+                // Only accept draws in our window and not in the future
+                if (draw.draw_date < startDate || draw.draw_date > todayStr) {
+                    console.log(`Out of window: ${draw.draw_date}`);
+                    continue;
                 }
 
-                console.log('Valid new draws:', validDraws.length);
-
-                if (validDraws.length > 0) {
-                    await base44.asServiceRole.entities.Draw.bulkCreate(validDraws);
-                    results.push({
-                        lottery: lottery.name,
-                        synced: validDraws.length,
-                        message: `${validDraws.length} novo(s) sorteio(s)`
-                    });
-                } else {
-                    results.push({
-                        lottery: lottery.name,
-                        synced: 0,
-                        message: 'Nenhum sorteio novo'
-                    });
+                // KEY FIX: Skip if date already exists (dedup by DATE ONLY)
+                if (existingDates.has(draw.draw_date)) {
+                    console.log(`Date already exists, skipping: ${draw.draw_date}`);
+                    continue;
                 }
 
-            } catch (error) {
-                console.error(`Error syncing ${lottery.name}:`, error.message);
-                results.push({
-                    lottery: lottery.name,
-                    synced: 0,
-                    message: 'Erro: ' + error.message
+                // Validate main numbers
+                const mainNums = draw.main_numbers.map(n => parseInt(n)).filter(n => !isNaN(n));
+                if (mainNums.length !== config.mainCount) {
+                    console.log(`Wrong main count for ${draw.draw_date}: ${mainNums.length} (expected ${config.mainCount})`);
+                    continue;
+                }
+                if (mainNums.some(n => n < config.mainMin || n > config.mainMax)) {
+                    console.log(`Main numbers out of range for ${draw.draw_date}: ${mainNums}`);
+                    continue;
+                }
+                if (new Set(mainNums).size !== mainNums.length) {
+                    console.log(`Duplicate main numbers for ${draw.draw_date}`);
+                    continue;
+                }
+
+                // Validate extra numbers
+                const extraNums = (draw.extra_numbers || []).map(n => parseInt(n)).filter(n => !isNaN(n));
+                if (config.extraCount > 0 && extraNums.length !== config.extraCount) {
+                    console.log(`Wrong extra count for ${draw.draw_date}: ${extraNums.length} (expected ${config.extraCount})`);
+                    continue;
+                }
+                if (extraNums.some(n => n < config.extraMin || n > config.extraMax)) {
+                    console.log(`Extra numbers out of range for ${draw.draw_date}: ${extraNums}`);
+                    continue;
+                }
+
+                console.log(`✓ Valid draw: ${draw.draw_date} | main: ${mainNums} | extra: ${extraNums}`);
+                existingDates.add(draw.draw_date); // prevent double-insert within same batch
+                toInsert.push({
+                    lottery_id: lottery.id,
+                    draw_date: draw.draw_date,
+                    main_numbers: mainNums.sort((a, b) => a - b),
+                    extra_numbers: extraNums.sort((a, b) => a - b)
                 });
             }
+
+            if (toInsert.length > 0) {
+                await base44.asServiceRole.entities.Draw.bulkCreate(toInsert);
+                console.log(`Inserted ${toInsert.length} draw(s) for ${lottery.name}`);
+            }
+
+            results.push({
+                lottery: lottery.name,
+                synced: toInsert.length,
+                cleaned: cleanedCount,
+                message: toInsert.length > 0
+                    ? `${toInsert.length} novo(s) sorteio(s) inserido(s)`
+                    : 'Sem novos sorteios'
+            });
         }
+
+        // 5. AUTO-VALIDATE PENDING SUGGESTIONS
+        console.log('\n=== AUTO-VALIDATING SUGGESTIONS ===');
+        let validated = 0;
+        let totalMatches = 0;
+
+        const allSuggestions = await base44.asServiceRole.entities.Suggestion.list();
+        const allDrawsForValidation = await base44.asServiceRole.entities.Draw.list();
+
+        for (const suggestion of allSuggestions) {
+            if (suggestion.was_validated) continue;
+            if (!suggestion.draw_date) continue;
+
+            const matchingDraw = allDrawsForValidation.find(d =>
+                d.lottery_id === suggestion.lottery_id &&
+                d.draw_date === suggestion.draw_date
+            );
+
+            if (!matchingDraw) continue;
+
+            const matchesMain = suggestion.main_numbers.filter(n =>
+                matchingDraw.main_numbers.includes(n)
+            ).length;
+
+            const matchesExtra = (suggestion.extra_numbers || []).filter(n =>
+                (matchingDraw.extra_numbers || []).includes(n)
+            ).length;
+
+            await base44.asServiceRole.entities.Suggestion.update(suggestion.id, {
+                actual_main_numbers: matchingDraw.main_numbers,
+                actual_extra_numbers: matchingDraw.extra_numbers || [],
+                matches_main: matchesMain,
+                matches_extra: matchesExtra,
+                was_validated: true
+            });
+
+            validated++;
+            totalMatches += matchesMain + matchesExtra;
+            console.log(`✓ Validated suggestion ${suggestion.draw_date}: ${matchesMain}+${matchesExtra} hits`);
+        }
+
+        console.log(`Validated: ${validated}, Total hits: ${totalMatches}`);
+        console.log('=== SYNC COMPLETE ===');
 
         const totalSynced = results.reduce((sum, r) => sum + r.synced, 0);
-
-        console.log('=== SYNC ALL COMPLETED ===');
-        console.log('Total synced:', totalSynced);
-
-        // AUTOMATICALLY VALIDATE ALL SUGGESTIONS (not just new ones)
-        console.log('\n=== AUTO-VALIDATING ALL SUGGESTIONS ===');
-        let validationResult = { validated: 0, total_matches: 0 };
-        
-        try {
-            // Get ALL suggestions and ALL draws
-            const allSuggestions = await base44.asServiceRole.entities.Suggestion.list();
-            const allDraws = await base44.asServiceRole.entities.Draw.list();
-            
-            console.log('Total suggestions:', allSuggestions.length);
-            console.log('Total draws:', allDraws.length);
-
-            for (const suggestion of allSuggestions) {
-                // Skip if already validated
-                if (suggestion.was_validated) continue;
-                
-                // Find matching draw by lottery_id AND draw_date
-                const matchingDraw = allDraws.find(d => 
-                    d.lottery_id === suggestion.lottery_id && 
-                    d.draw_date === suggestion.draw_date
-                );
-
-                if (!matchingDraw) {
-                    console.log(`No draw found for suggestion ${suggestion.draw_date}`);
-                    continue;
-                }
-
-                const matchesMain = suggestion.main_numbers.filter(num => 
-                    matchingDraw.main_numbers.includes(num)
-                ).length;
-
-                const matchesExtra = (suggestion.extra_numbers || []).filter(num => 
-                    (matchingDraw.extra_numbers || []).includes(num)
-                ).length;
-
-                await base44.asServiceRole.entities.Suggestion.update(suggestion.id, {
-                    actual_main_numbers: matchingDraw.main_numbers,
-                    actual_extra_numbers: matchingDraw.extra_numbers || [],
-                    matches_main: matchesMain,
-                    matches_extra: matchesExtra,
-                    was_validated: true
-                });
-
-                validationResult.validated++;
-                validationResult.total_matches += matchesMain + matchesExtra;
-
-                console.log(`✓ ${suggestion.draw_date}: ${matchesMain} main + ${matchesExtra} extra`);
-            }
-
-            console.log('=== VALIDATION COMPLETED ===');
-            console.log('Validated:', validationResult.validated);
-            console.log('Total matches:', validationResult.total_matches);
-
-        } catch (validationError) {
-            console.error('Validation error:', validationError.message);
-        }
-
-        const message = totalSynced > 0 
-            ? `✓ ${totalSynced} novo(s) sorteio(s) sincronizado(s)${validationResult.validated > 0 ? ` • ${validationResult.validated} sugestões validadas com ${validationResult.total_matches} acertos` : ''}` 
-            : `✓ Todos os sorteios dos últimos 7 dias já estão na base`;
+        const totalCleaned = results.reduce((sum, r) => sum + (r.cleaned || 0), 0);
 
         return Response.json({
             success: true,
-            message: message,
+            message: `✓ ${totalSynced} sorteio(s) sincronizado(s)${totalCleaned > 0 ? ` • ${totalCleaned} duplicado(s) removido(s)` : ''}${validated > 0 ? ` • ${validated} sugestão(ões) validada(s)` : ''}`,
             total_synced: totalSynced,
-            validation: validationResult,
-            results: results
+            total_cleaned: totalCleaned,
+            validation: { validated, total_matches: totalMatches },
+            results
         });
 
     } catch (error) {
-        console.error('=== SYNC ERROR ===');
-        console.error('Error:', error.message);
-        
-        return Response.json({ 
-            success: false,
-            error: 'Erro ao sincronizar',
-            message: error.message
-        }, { status: 500 });
+        console.error('SYNC ERROR:', error.message);
+        return Response.json({ success: false, error: error.message }, { status: 500 });
     }
 });
