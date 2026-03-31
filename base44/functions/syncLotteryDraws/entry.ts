@@ -193,6 +193,7 @@ REGRAS ABSOLUTAS:
                 }
 
                 console.log(`✓ Valid draw: ${draw.draw_date} | main: ${mainNums} | extra: ${extraNums}`);
+                toInsert.push({ lottery_id: lottery.id, draw_date: draw.draw_date, main_numbers: mainNums.sort((a,b)=>a-b), extra_numbers: extraNums.sort((a,b)=>a-b) });
                 existingDates.add(draw.draw_date); // prevent double-insert within same batch
             }
 
@@ -223,10 +224,17 @@ REGRAS ABSOLUTAS:
             if (suggestion.was_validated) continue;
             if (!suggestion.draw_date) continue;
 
-            const matchingDraw = allDrawsForValidation.find(d =>
-                d.lottery_id === suggestion.lottery_id &&
-                d.draw_date === suggestion.draw_date
-            );
+            // Exact match OR find the closest draw on/after the suggestion date (within 7 days)
+            const lotteryDraws = allDrawsForValidation
+                .filter(d => d.lottery_id === suggestion.lottery_id && d.draw_date >= suggestion.draw_date)
+                .sort((a, b) => a.draw_date.localeCompare(b.draw_date));
+
+            let matchingDraw = lotteryDraws[0];
+            // Only validate if the draw is within 7 days of the suggestion date
+            if (matchingDraw) {
+                const diffDays = (new Date(matchingDraw.draw_date) - new Date(suggestion.draw_date)) / (1000 * 60 * 60 * 24);
+                if (diffDays > 7) matchingDraw = null;
+            }
 
             if (!matchingDraw) continue;
 

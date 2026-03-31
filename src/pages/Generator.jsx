@@ -223,8 +223,32 @@ export default function Generator() {
       };
 
       setLearningInsights(insights);
-      setGeneratedNumbers({ mainNumbers, extraNumbers });
+      const result = { mainNumbers, extraNumbers };
+      setGeneratedNumbers(result);
       setIsGenerating(false);
+
+      // AUTO-SAVE: guardar automaticamente para o próximo sorteio
+      const nextDate = calculateNextDrawDate();
+      if (nextDate && selectedLottery) {
+        base44.entities.Suggestion.filter({ lottery_id: selectedLottery, draw_date: nextDate })
+          .then(existing => {
+            if (existing.length === 0) {
+              return base44.entities.Suggestion.create({
+                lottery_id: selectedLottery,
+                draw_date: nextDate,
+                main_numbers: mainNumbers,
+                extra_numbers: extraNumbers,
+                algorithm: 'quantum_chaos_lln',
+                parameters: { strategy_applied: aiState.strategy, correction_factor: aiState.correction_factor, historical_depth: totalDraws },
+                confidence_score: 0.88,
+                was_validated: false,
+                notes: `Auto-guardado. Estratégia: ${aiState.strategy}`
+              });
+            }
+          })
+          .then(() => queryClient.invalidateQueries({ queryKey: ['suggestions'] }))
+          .catch(err => console.error('Auto-save failed:', err));
+      }
     }, 1500);
   };
 
