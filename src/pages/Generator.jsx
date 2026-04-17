@@ -1,495 +1,511 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { base44 } from '@/api/base44Client';
-import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Sparkles, Loader2, ArrowLeft, Save, Brain, Network } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Sparkles, Loader2, ArrowLeft, Save, RefreshCw, Info, TrendingUp, BarChart2, Shield } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Badge } from '@/components/ui/badge';
-
 import NumberBall from '../components/lottery/NumberBall';
 
+// ══════════════════════════════════════════════════════════════════════════════
+// CAISHEN v2 — Motor Anti-Humano
+// Filosofia: loterias são IMPREVISÍVEIS por definição.
+// O que é possível: gerar combinações que humanos raramente escolhem,
+// maximizando o prize-share potencial se ganhar. + Análise honesta.
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Combinações "humanas" a evitar (muito jogas):
+// — sequências aritméticas: 1-2-3-4-5, 5-10-15-20-25
+// — datas: concentração em 1-31
+// — espelhados: 11,22,33,44
+// — baixos: 1-12 (aniversários / meses)
+
+function humanBiasScore(combo) {
+  // Retorna 0-1: 0 = muito humano, 1 = pouco humano
+  let penalty = 0;
+  const sorted = [...combo].sort((a, b) => a - b);
+  const n = sorted.length;
+
+  // Penalizar concentração em 1-31 (datas)
+  const low = sorted.filter(x => x <= 31).length;
+  if (low / n >= 0.8) penalty += 0.4;
+  else if (low / n >= 0.6) penalty += 0.2;
+
+  // Penalizar sequências
+  let seqCount = 0;
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i] - sorted[i-1] === 1) seqCount++;
+  }
+  if (seqCount >= 3) penalty += 0.4;
+  else if (seqCount >= 2) penalty += 0.2;
+
+  // Penalizar multípliplos regulares (5, 10, 15...)
+  const mults = sorted.filter(x => x % 5 === 0).length;
+  if (mults >= 3) penalty += 0.2;
+
+  // Penalizar espelhados (11, 22, 33...)
+  const mirrors = sorted.filter(x => x % 11 === 0 && x > 0).length;
+  if (mirrors >= 2) penalty += 0.2;
+
+  return Math.max(0, 1 - penalty);
+}
+
+// Calcular score de originalidade real baseado no histórico
+function originalityScore(combo, draws, mainMin, mainMax) {
+  if (!draws || draws.length === 0) return 0.5;
+  // Verificar se esta combinação (ou muito parecida) já saiu
+  const comboSet = new Set(combo);
+  let maxOverlap = 0;
+  for (const draw of draws.slice(0, 200)) {
+    const overlap = (draw.main_numbers || []).filter(n => comboSet.has(n)).length;
+    if (overlap > maxOverlap) maxOverlap = overlap;
+  }
+  // Quanto menos overlap com histórico, mais "original"
+  return Math.max(0, 1 - (maxOverlap / combo.length) * 0.5);
+}
+
+// Distribuição equilibrada: paridade + amplitude
+function distributionScore(combo, mainMin, mainMax) {
+  const sorted = [...combo].sort((a, b) => a - b);
+  const n = sorted.length;
+  const range = mainMax - mainMin;
+  const mid = mainMin + range / 2;
+
+  // Paridade: idealmente 50/50 par/ímpar
+  const evens = sorted.filter(x => x % 2 === 0).length;
+  const parityScore = 1 - Math.abs((evens / n) - 0.5) * 2;
+
+  // Amplitude: queremos números espalhados
+  const span = sorted[n-1] - sorted[0];
+  const spanScore = span / range;
+
+  // Cobertura de zonas (dividir o range em 3 terços)
+  const third = range / 3;
+  const zones = new Set(sorted.map(x => Math.floor((x - mainMin) / third)));
+  const zoneScore = zones.size / 3;
+
+  return (parityScore * 0.3 + spanScore * 0.4 + zoneScore * 0.3);
+}
+
+// Calcular confiança REAL baseada em métricas objectivas
+function calcConfidence(combo, draws, mainMin, mainMax) {
+  const human = humanBiasScore(combo);
+  const distrib = distributionScore(combo, mainMin, mainMax);
+  const original = originalityScore(combo, draws, mainMin, mainMax);
+  // Confiança = média ponderada das métricas (nunca > 0.72 — honesto)
+  const raw = human * 0.35 + distrib * 0.40 + original * 0.25;
+  return Math.min(0.72, Math.max(0.28, raw));
+}
+
+// ── GERADOR PRINCIPAL ────────────────────────────────────────────────────────
+function generateAntiHuman(lottery, draws, seed = null) {
+  const { main_count, main_min, main_max, extra_count, extra_min, extra_max } = lottery;
+  const range = main_max - main_min + 1;
+  const rng = seed ? mulberry32(seed) : Math.random;
+
+  // Tentar até 200 combinações, guardar a melhor
+  let bestCombo = null;
+  let bestScore = -1;
+
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const combo = [];
+    const pool = Array.from({ length: range }, (_, i) => i + main_min);
+
+    // Shuffle Fisher-Yates
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+
+    // Pegar os primeiros main_count
+    combo.push(...pool.slice(0, main_count));
+    combo.sort((a, b) => a - b);
+
+    const human = humanBiasScore(combo);
+    const distrib = distributionScore(combo, main_min, main_max);
+    const score = human * 0.5 + distrib * 0.5;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestCombo = combo;
+    }
+  }
+
+  // Extras: mesmo processo com range menor
+  let extras = [];
+  if (extra_count > 0) {
+    let bestExtra = null, bestExtraScore = -1;
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const ePool = Array.from({ length: extra_max - extra_min + 1 }, (_, i) => i + extra_min);
+      for (let i = ePool.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        [ePool[i], ePool[j]] = [ePool[j], ePool[i]];
+      }
+      const eCombo = ePool.slice(0, extra_count).sort((a, b) => a - b);
+      const s = distributionScore(eCombo, extra_min, extra_max);
+      if (s > bestExtraScore) { bestExtraScore = s; bestExtra = eCombo; }
+    }
+    extras = bestExtra || [];
+  }
+
+  const confidence = calcConfidence(bestCombo, draws, main_min, main_max);
+  const humanScore = humanBiasScore(bestCombo);
+  const distribScore = distributionScore(bestCombo, main_min, main_max);
+
+  return {
+    mainNumbers: bestCombo,
+    extraNumbers: extras,
+    confidence,
+    metrics: {
+      antiHuman: Math.round(humanScore * 100),
+      distribution: Math.round(distribScore * 100),
+      originality: Math.round(originalityScore(bestCombo, draws, main_min, main_max) * 100),
+    }
+  };
+}
+
+// Seedable RNG (para reprodutibilidade)
+function mulberry32(seed) {
+  let s = seed;
+  return () => {
+    s |= 0; s = s + 0x6D2B79F5 | 0;
+    let t = Math.imul(s ^ s >>> 15, 1 | s);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// ── DATA DO PRÓXIMO SORTEIO ──────────────────────────────────────────────────
+function nextDrawDate(lotteryName) {
+  const today = new Date();
+  const d = today.getDay();
+  let next = new Date(today);
+  if (lotteryName === 'EuroMilhões') {
+    if (d < 2) next.setDate(today.getDate() + (2 - d));
+    else if (d < 5) next.setDate(today.getDate() + (5 - d));
+    else next.setDate(today.getDate() + (9 - d));
+  } else if (lotteryName === 'Totoloto') {
+    if (d < 3) next.setDate(today.getDate() + (3 - d));
+    else if (d < 6) next.setDate(today.getDate() + (6 - d));
+    else next.setDate(today.getDate() + (10 - d));
+  } else if (lotteryName === 'EuroDreams') {
+    if (d === 0) next.setDate(today.getDate() + 1);
+    else if (d < 4) next.setDate(today.getDate() + (4 - d));
+    else next.setDate(today.getDate() + (8 - d));
+  } else {
+    next.setDate(today.getDate() + 1);
+  }
+  return next.toISOString().split('T')[0];
+}
+
+// ── COMPONENTE MÉTRICA ───────────────────────────────────────────────────────
+function MetricBar({ label, value, color, tooltip }) {
+  return (
+    <div className="space-y-1">
+      <div className="flex justify-between items-center text-xs">
+        <span className="text-slate-500 font-medium">{label}</span>
+        <span className="font-bold" style={{ color }}>{value}%</span>
+      </div>
+      <div className="w-full bg-slate-100 rounded-full h-2">
+        <motion.div
+          initial={{ width: 0 }}
+          animate={{ width: `${value}%` }}
+          transition={{ duration: 0.6, ease: 'easeOut' }}
+          className="h-2 rounded-full"
+          style={{ background: color }}
+        />
+      </div>
+      {tooltip && <p className="text-[10px] text-slate-400 leading-tight">{tooltip}</p>}
+    </div>
+  );
+}
+
+// ── COMPONENTE PRINCIPAL ─────────────────────────────────────────────────────
 export default function Generator() {
   const [selectedLottery, setSelectedLottery] = useState(null);
-  const [generatedNumbers, setGeneratedNumbers] = useState(null);
+  const [result, setResult] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [learningInsights, setLearningInsights] = useState(null);
-  
-  // A IA controla estes pesos de forma autónoma baseada no gradiente de erro
-  const [aiState, setAiState] = useState({
-    strategy: 'balanced',
-    lln_weight: 1.0,
-    chaos_weight: 1.0,
-    correction_factor: 1.0
-  });
-
+  const [savedMsg, setSavedMsg] = useState('');
   const queryClient = useQueryClient();
 
   const { data: lotteries = [] } = useQuery({
     queryKey: ['lotteries'],
     queryFn: () => base44.entities.Lottery.filter({ is_active: true }),
+    onSuccess: (data) => { if (data.length && !selectedLottery) setSelectedLottery(data[0].id); }
   });
 
-  const { data: allDraws = [] } = useQuery({
-    queryKey: ['all-draws-complete', selectedLottery],
-    queryFn: async () => {
-      if (!selectedLottery) return [];
-      const draws = await base44.entities.Draw.filter({ lottery_id: selectedLottery });
-      return draws.sort((a, b) => b.draw_date.localeCompare(a.draw_date));
-    },
+  React.useEffect(() => {
+    if (lotteries.length > 0 && !selectedLottery) setSelectedLottery(lotteries[0].id);
+  }, [lotteries]);
+
+  const { data: draws = [] } = useQuery({
+    queryKey: ['draws-generator', selectedLottery],
+    queryFn: () => base44.entities.Draw.filter({ lottery_id: selectedLottery }),
     enabled: !!selectedLottery,
   });
 
-  const { data: validatedSuggestions = [] } = useQuery({
-    queryKey: ['validated-suggestions', selectedLottery],
-    queryFn: async () => {
-      if (!selectedLottery) return [];
-      const all = await base44.entities.Suggestion.list();
-      return all.filter(s => s.lottery_id === selectedLottery && s.was_validated)
-                .sort((a, b) => b.draw_date.localeCompare(a.draw_date));
-    },
-    enabled: !!selectedLottery,
-  });
-
-  const saveSuggestionMutation = useMutation({
+  const saveMutation = useMutation({
     mutationFn: (data) => base44.entities.Suggestion.create(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['suggestions'] });
-      setGeneratedNumbers(null);
+      setSavedMsg('✓ Guardado para validação');
+      setTimeout(() => setSavedMsg(''), 3000);
     }
   });
 
-  useEffect(() => {
-    if (lotteries.length > 0 && !selectedLottery) {
-      setSelectedLottery(lotteries[0].id);
-    }
-  }, [lotteries, selectedLottery]);
-
-  // ANÁLISE DE FEEDBACK CONTÍNUO E CORREÇÃO DE ERRO
-  useEffect(() => {
-    if (validatedSuggestions.length > 0) {
-      const lastSuggestion = validatedSuggestions[0];
-      const matches = lastSuggestion.matches_main || 0;
-      
-      setAiState(prev => {
-        let newState = { ...prev };
-        if (matches <= 1) {
-          newState.correction_factor = 1.5;
-          newState.strategy = prev.strategy === 'lln_heavy' ? 'chaos_heavy' : 'lln_heavy';
-        } else if (matches >= 2) {
-          newState.correction_factor = 0.8;
-          newState.lln_weight += 0.1;
-        }
-        return newState;
-      });
-    }
-  }, [validatedSuggestions]);
-
   const currentLottery = lotteries.find(l => l.id === selectedLottery);
 
-  const calculateNextDrawDate = () => {
-    if (!currentLottery) return null;
-    const today = new Date();
-    const dayOfWeek = today.getDay();
-    let nextDrawDate = new Date(today);
-
-    if (currentLottery.name === 'EuroMilhões') {
-      if (dayOfWeek < 2) nextDrawDate.setDate(today.getDate() + (2 - dayOfWeek));
-      else if (dayOfWeek >= 2 && dayOfWeek < 5) nextDrawDate.setDate(today.getDate() + (5 - dayOfWeek));
-      else nextDrawDate.setDate(today.getDate() + (9 - dayOfWeek));
-    } else if (currentLottery.name === 'Totoloto') {
-      if (dayOfWeek < 3) nextDrawDate.setDate(today.getDate() + (3 - dayOfWeek));
-      else if (dayOfWeek >= 3 && dayOfWeek < 6) nextDrawDate.setDate(today.getDate() + (6 - dayOfWeek));
-      else nextDrawDate.setDate(today.getDate() + (10 - dayOfWeek));
-    } else if (currentLottery.name === 'EuroDreams') {
-      if (dayOfWeek === 0) nextDrawDate.setDate(today.getDate() + 1);
-      else if (dayOfWeek < 4) nextDrawDate.setDate(today.getDate() + (4 - dayOfWeek));
-      else nextDrawDate.setDate(today.getDate() + (8 - dayOfWeek));
-    }
-    return nextDrawDate.toISOString().split('T')[0];
-  };
-
-  const generateNumbers = () => {
-    if (!currentLottery || allDraws.length < 10) return;
-
+  const generate = () => {
+    if (!currentLottery || draws.length < 5) return;
     setIsGenerating(true);
-    setLearningInsights(null);
-    
+    setResult(null);
+    // setTimeout para dar feedback visual
     setTimeout(() => {
-      const totalDraws = allDraws.length;
-      
-      // 1. LEI DOS GRANDES NÚMEROS (Convergência)
-      const totalNumbersPossible = currentLottery.main_max - currentLottery.main_min + 1;
-      const expectedFrequency = totalDraws * (currentLottery.main_count / totalNumbersPossible);
-      
-      const freqMap = {};
-      const chaosMomentum = {};
-      
-      allDraws.forEach((draw, idx) => {
-        draw.main_numbers?.forEach(num => {
-          freqMap[num] = (freqMap[num] || 0) + 1;
-          // 2. TEORIA DO CAOS: peso exponencial para "momentum" nos últimos 10 sorteios
-          if (idx < 10) {
-            chaosMomentum[num] = (chaosMomentum[num] || 0) + (10 - idx);
-          }
-        });
-      });
-
-      const weightedPool = [];
-
-      // 3. ATRIBUIÇÃO DE PONTUAÇÃO (Mistura de Modelos)
-      for (let i = currentLottery.main_min; i <= currentLottery.main_max; i++) {
-        const freq = freqMap[i] || 0;
-        const llnDeviation = expectedFrequency - freq;
-        let llnScore = llnDeviation > 0 ? (llnDeviation * 1.5) : 1;
-        const chaosScore = (chaosMomentum[i] || 0) * 2.0;
-
-        let finalWeight = 0;
-        if (aiState.strategy === 'lln_heavy') {
-          finalWeight = (llnScore * 2.0) + (chaosScore * 0.5);
-        } else if (aiState.strategy === 'chaos_heavy') {
-          finalWeight = (llnScore * 0.5) + (chaosScore * 2.5);
-        } else {
-          finalWeight = llnScore + chaosScore;
-        }
-
-        finalWeight *= aiState.correction_factor;
-        finalWeight = Math.max(1, finalWeight);
-
-        const weightedCount = Math.round(finalWeight * 10);
-        for (let j = 0; j < weightedCount; j++) {
-          weightedPool.push(i);
-        }
-      }
-
-      // 4. TEORIA DOS JOGOS (Espalhamento Estratégico)
-      const mainNumbers = [];
-      const poolCopy = [...weightedPool];
-      
-      while (mainNumbers.length < currentLottery.main_count && poolCopy.length > 0) {
-        const randomIndex = Math.floor(Math.random() * poolCopy.length);
-        let num = poolCopy[randomIndex];
-        
-        if (mainNumbers.length >= 3) {
-          const lowNumbers = mainNumbers.filter(n => n <= 31).length;
-          if (lowNumbers >= 3 && num <= 31 && currentLottery.main_max > 31) {
-            continue;
-          }
-        }
-        
-        if (!mainNumbers.includes(num)) {
-          mainNumbers.push(num);
-          for (let i = poolCopy.length - 1; i >= 0; i--) {
-            if (poolCopy[i] === num) poolCopy.splice(i, 1);
-          }
-        }
-      }
-
-      mainNumbers.sort((a, b) => a - b);
-
-      let extraNumbers = [];
-      if (currentLottery.extra_count > 0) {
-        const extraFreqMap = {};
-        allDraws.slice(0, 50).forEach(draw => {
-          draw.extra_numbers?.forEach(num => {
-            extraFreqMap[num] = (extraFreqMap[num] || 0) + 1;
-          });
-        });
-
-        const extraPool = [];
-        for (let i = currentLottery.extra_min; i <= currentLottery.extra_max; i++) {
-          const w = Math.max(1, (extraFreqMap[i] || 1) * 2);
-          for (let j = 0; j < w; j++) extraPool.push(i);
-        }
-        
-        while (extraNumbers.length < currentLottery.extra_count && extraPool.length > 0) {
-          const randomIndex = Math.floor(Math.random() * extraPool.length);
-          const num = extraPool.splice(randomIndex, 1)[0];
-          if (!extraNumbers.includes(num)) extraNumbers.push(num);
-        }
-        extraNumbers.sort((a, b) => a - b);
-      }
-
-      // 5. INSIGHTS PARA O UTILIZADOR
-      const insights = {
-        strategyUsed: aiState.strategy,
-        expectedMean: expectedFrequency.toFixed(1),
-        entropyCorrection: aiState.correction_factor.toFixed(2),
-        chaosPicks: mainNumbers.filter(n => chaosMomentum[n] > 0).length,
-        llnPicks: mainNumbers.filter(n => (freqMap[n] || 0) < expectedFrequency).length
-      };
-
-      setLearningInsights(insights);
-      const result = { mainNumbers, extraNumbers };
-      setGeneratedNumbers(result);
+      const r = generateAntiHuman(currentLottery, draws);
+      setResult(r);
       setIsGenerating(false);
-
-      // AUTO-SAVE: guardar automaticamente para o próximo sorteio
-      const nextDate = calculateNextDrawDate();
-      if (nextDate && selectedLottery) {
-        base44.entities.Suggestion.filter({ lottery_id: selectedLottery, draw_date: nextDate })
-          .then(existing => {
-            if (existing.length === 0) {
-              return base44.entities.Suggestion.create({
-                lottery_id: selectedLottery,
-                draw_date: nextDate,
-                main_numbers: mainNumbers,
-                extra_numbers: extraNumbers,
-                algorithm: 'quantum_chaos_lln',
-                parameters: { strategy_applied: aiState.strategy, correction_factor: aiState.correction_factor, historical_depth: totalDraws },
-                confidence_score: 0.88,
-                was_validated: false,
-                notes: `Auto-guardado. Estratégia: ${aiState.strategy}`
-              });
-            }
-          })
-          .then(() => queryClient.invalidateQueries({ queryKey: ['suggestions'] }))
-          .catch(err => console.error('Auto-save failed:', err));
-      }
-    }, 1500);
+    }, 600);
   };
 
-  const saveSuggestion = async () => {
-    if (!generatedNumbers || !selectedLottery) return;
-
-    const nextDrawDate = calculateNextDrawDate();
-    if (!nextDrawDate) return;
-
-    const existingSuggestions = await base44.entities.Suggestion.filter({
-      lottery_id: selectedLottery,
-      draw_date: nextDrawDate
-    });
-
-    if (existingSuggestions.length > 0) {
-      alert('A IA já gravou uma previsão para o próximo sorteio desta lotaria.');
+  const save = async () => {
+    if (!result || !currentLottery) return;
+    const date = nextDrawDate(currentLottery.name);
+    // Evitar duplicado
+    const existing = await base44.entities.Suggestion.filter({ lottery_id: selectedLottery, draw_date: date });
+    if (existing.length > 0) {
+      setSavedMsg('⚠ Já existe sugestão para este sorteio');
+      setTimeout(() => setSavedMsg(''), 3000);
       return;
     }
-
-    await saveSuggestionMutation.mutateAsync({
+    await saveMutation.mutateAsync({
       lottery_id: selectedLottery,
-      draw_date: nextDrawDate,
-      main_numbers: generatedNumbers.mainNumbers,
-      extra_numbers: generatedNumbers.extraNumbers,
-      algorithm: 'quantum_chaos_lln',
+      draw_date: date,
+      main_numbers: result.mainNumbers,
+      extra_numbers: result.extraNumbers,
+      algorithm: 'anti_human_v2',
       parameters: {
-        strategy_applied: aiState.strategy,
-        correction_factor: aiState.correction_factor,
-        historical_depth: allDraws.length
+        metrics: result.metrics,
+        draws_analyzed: draws.length,
       },
-      confidence_score: 0.88,
+      confidence_score: result.confidence,
       was_validated: false,
-      notes: `Geração Autónoma. Estratégia: ${aiState.strategy}`
+      notes: `Anti-humano v2. Anti-bias: ${result.metrics.antiHuman}%, Distribuição: ${result.metrics.distribution}%`,
     });
-    alert('Previsão gravada no histórico para validação futura.');
   };
 
-  const strategyLabel = {
-    balanced: 'Balanceada',
-    lln_heavy: 'Convergência LLN',
-    chaos_heavy: 'Foco em Caos'
-  };
+  const metrics = result?.metrics;
+  const confidence = result ? Math.round(result.confidence * 100) : null;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50 p-6">
-      <div className="max-w-6xl mx-auto space-y-6">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-4 md:p-6">
+      <div className="max-w-2xl mx-auto space-y-5">
+
+        {/* Header */}
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <Link to={createPageUrl('Dashboard')}>
-              <Button variant="outline" size="icon">
+              <button className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center text-white hover:bg-white/20 transition-colors">
                 <ArrowLeft className="w-4 h-4" />
-              </Button>
+              </button>
             </Link>
             <div>
-              <h1 className="text-3xl font-bold tracking-tight text-slate-900">Motor de Previsão φ</h1>
-              <p className="text-slate-500">LLN • Teoria do Caos • Teoria dos Jogos</p>
+              <h1 className="text-xl font-black text-white tracking-tight">Gerador Anti-Humano</h1>
+              <p className="text-xs text-slate-400">Combinações que jogadores raramente escolhem</p>
             </div>
           </div>
-
-          <Select value={selectedLottery || ''} onValueChange={setSelectedLottery}>
-            <SelectTrigger className="w-48 bg-white">
-              <SelectValue placeholder="Selecione a lotaria" />
+          <Select value={selectedLottery || ''} onValueChange={v => { setSelectedLottery(v); setResult(null); }}>
+            <SelectTrigger className="w-36 bg-white/10 border-white/20 text-white text-xs">
+              <SelectValue placeholder="Loteria" />
             </SelectTrigger>
             <SelectContent>
-              {lotteries.map(lottery => (
-                <SelectItem key={lottery.id} value={lottery.id}>
-                  {lottery.name}
-                </SelectItem>
+              {lotteries.map(l => (
+                <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
 
-        <div className="grid lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-6">
-            <Card className="relative overflow-hidden border-indigo-100 shadow-sm">
-              <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-br from-indigo-500/10 to-purple-500/10 rounded-full blur-3xl -z-10" />
-              
-              <CardHeader>
-                <CardTitle className="text-xl">Síntese Quântica</CardTitle>
-              </CardHeader>
-              
-              <CardContent className="space-y-8">
-                <AnimatePresence mode="wait">
-                  {!generatedNumbers ? (
-                    <motion.div
-                      key="empty"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="flex flex-col items-center justify-center py-20"
-                    >
-                      <Network className="w-20 h-20 text-indigo-200 mb-6 animate-pulse" />
-                      <p className="text-slate-600 text-center font-medium">
-                        O algoritmo aguarda inicialização
-                      </p>
-                      <p className="text-sm text-slate-400 mt-2 text-center max-w-sm">
-                        Irá analisar {allDraws.length} sorteios e aplicar auto-correção baseada na última falha/sucesso do modelo.
-                      </p>
-                    </motion.div>
-                  ) : (
-                    <motion.div
-                      key="numbers"
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="space-y-8"
-                    >
-                      <div className="bg-white/50 p-6 rounded-2xl border border-slate-100 backdrop-blur-sm">
-                        <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-4">Números Calculados</p>
-                        <div className="flex gap-3 flex-wrap">
-                          {generatedNumbers.mainNumbers.map((num, idx) => (
-                            <NumberBall key={idx} number={num} size="lg" />
-                          ))}
-                        </div>
-                      </div>
+        {/* Info banner */}
+        <div className="rounded-2xl p-4 border border-amber-500/30 bg-amber-500/10 flex gap-3">
+          <Info className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+          <p className="text-xs text-amber-200 leading-relaxed">
+            <strong>Como funciona:</strong> Loterias são aleatórias — ninguém pode prever o resultado.
+            Este gerador cria combinações que os jogadores humanos raramente escolhem (evita datas, sequências,
+            números redondos). Se ganhar, partilha o prémio com menos pessoas.
+          </p>
+        </div>
 
-                      {generatedNumbers.extraNumbers.length > 0 && (
-                        <div className="bg-white/50 p-6 rounded-2xl border border-slate-100 backdrop-blur-sm">
-                          <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-4">
-                            {currentLottery?.extra_name || 'Extras'}
-                          </p>
-                          <div className="flex gap-3 flex-wrap">
-                            {generatedNumbers.extraNumbers.map((num, idx) => (
-                              <NumberBall key={idx} number={num} size="lg" isExtra />
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+        {/* Gerador */}
+        <div className="rounded-3xl overflow-hidden border border-white/10" style={{ background: 'rgba(255,255,255,0.05)' }}>
+          <div className="p-6 space-y-6">
 
-                <div className="flex gap-3 pt-4 border-t border-slate-100">
-                  <Button 
-                    onClick={generateNumbers}
-                    disabled={isGenerating || !currentLottery || allDraws.length < 10}
-                    size="lg"
-                    className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white shadow-md transition-all"
-                  >
-                    {isGenerating ? (
-                      <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                    ) : (
-                      <Brain className="w-5 h-5 mr-2" />
-                    )}
-                    {isGenerating ? 'A processar tensores...' : 'Iniciar Simulação de Chave'}
-                  </Button>
-
-                  {generatedNumbers && (
-                    <Button
-                      variant="outline"
-                      size="lg"
-                      onClick={saveSuggestion}
-                      disabled={saveSuggestionMutation.isPending}
-                      className="border-indigo-200 text-indigo-700 hover:bg-indigo-50"
-                    >
-                      {saveSuggestionMutation.isPending ? (
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                      ) : (
-                        <>
-                          <Save className="w-5 h-5 mr-2" />
-                          Registar
-                        </>
-                      )}
-                    </Button>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="space-y-6">
-            <Card className="border-slate-200 shadow-sm">
-              <CardHeader className="bg-slate-50 border-b border-slate-100 pb-4">
-                <CardTitle className="flex items-center gap-2 text-sm uppercase tracking-wider text-slate-600">
-                  <Network className="w-4 h-4" />
-                  Estado do Motor Neural
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="pt-6 space-y-6">
-                <div>
-                  <div className="flex justify-between items-end mb-2">
-                    <p className="text-sm font-medium text-slate-700">Estratégia Ativa</p>
-                    <Badge variant="secondary" className="bg-indigo-100 text-indigo-700">
-                      {strategyLabel[aiState.strategy] || aiState.strategy}
-                    </Badge>
+            {/* Números */}
+            <AnimatePresence mode="wait">
+              {!result && !isGenerating && (
+                <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  className="flex flex-col items-center justify-center py-10 gap-3">
+                  <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
+                    <Sparkles className="w-8 h-8 text-slate-400" />
                   </div>
-                  <p className="text-xs text-slate-500 leading-relaxed">
-                    O modelo adaptou-se automaticamente com base na análise do erro da última sugestão em relação ao resultado real.
+                  <p className="text-slate-400 text-sm text-center">
+                    {draws.length > 0
+                      ? `Pronto — ${draws.length} sorteios analisados`
+                      : 'Carregando histórico...'}
                   </p>
-                </div>
+                </motion.div>
+              )}
 
-                {learningInsights && (
-                  <div className="space-y-4 pt-4 border-t border-slate-100">
-                    <div>
-                      <p className="text-xs text-slate-500 mb-1">Entropia / Correção de Erro</p>
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1 bg-slate-100 rounded-full h-1.5">
-                          <div 
-                            className="bg-indigo-500 h-1.5 rounded-full transition-all" 
-                            style={{ width: `${Math.min(100, learningInsights.entropyCorrection * 50)}%` }}
-                          />
-                        </div>
-                        <span className="text-xs font-mono text-slate-600">{learningInsights.entropyCorrection}x</span>
-                      </div>
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-4 mt-4">
-                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                        <p className="text-[10px] uppercase text-slate-400 font-semibold mb-1">Teoria do Caos</p>
-                        <p className="text-lg font-bold text-slate-700">{learningInsights.chaosPicks} <span className="text-xs font-normal text-slate-500">nºs</span></p>
-                      </div>
-                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                        <p className="text-[10px] uppercase text-slate-400 font-semibold mb-1">Lei dos Grandes Nºs</p>
-                        <p className="text-lg font-bold text-slate-700">{learningInsights.llnPicks} <span className="text-xs font-normal text-slate-500">nºs</span></p>
-                      </div>
+              {isGenerating && (
+                <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  className="flex flex-col items-center justify-center py-10 gap-3">
+                  <Loader2 className="w-8 h-8 text-indigo-400 animate-spin" />
+                  <p className="text-slate-400 text-sm">A analisar {draws.length} sorteios...</p>
+                </motion.div>
+              )}
+
+              {result && !isGenerating && (
+                <motion.div key="result" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+                  className="space-y-5">
+                  {/* Números principais */}
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">
+                      {currentLottery?.name}
+                    </p>
+                    <div className="flex gap-2 flex-wrap">
+                      {result.mainNumbers.map((num, i) => (
+                        <NumberBall key={i} number={num} size="lg" />
+                      ))}
                     </div>
                   </div>
-                )}
-
-                <div className="pt-4 border-t border-slate-100 space-y-3">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Modelos Ativos</p>
-                  {[
-                    { label: 'Lei dos Grandes Números', desc: 'Convergência estatística de longo prazo' },
-                    { label: 'Teoria do Caos', desc: 'Atratores e momentum dos últimos 10 sorteios' },
-                    { label: 'Correção de Erro', desc: 'Feedback loop baseado na última sugestão' },
-                    { label: 'Teoria dos Jogos', desc: 'Dispersão anti-clustering para maximizar prémio único' },
-                  ].map((model, idx) => (
-                    <div key={idx} className="flex items-start gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 flex-shrink-0" />
-                      <div>
-                        <p className="text-xs font-medium text-slate-700">{model.label}</p>
-                        <p className="text-[10px] text-slate-400">{model.desc}</p>
+                  {/* Extras */}
+                  {result.extraNumbers.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">
+                        {currentLottery?.extra_name || 'Estrelas'}
+                      </p>
+                      <div className="flex gap-2 flex-wrap">
+                        {result.extraNumbers.map((num, i) => (
+                          <NumberBall key={i} number={num} size="lg" isExtra />
+                        ))}
                       </div>
                     </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Botões */}
+            <div className="flex gap-3 pt-2 border-t border-white/10">
+              <button onClick={generate}
+                disabled={isGenerating || !currentLottery || draws.length < 5}
+                className="flex-1 py-3.5 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-all disabled:opacity-40"
+                style={{ background: isGenerating ? 'rgba(99,102,241,0.5)' : '#6366f1', color: '#fff', boxShadow: '0 4px 20px rgba(99,102,241,0.3)' }}>
+                {isGenerating
+                  ? <><Loader2 className="w-4 h-4 animate-spin" /> A gerar...</>
+                  : <><RefreshCw className="w-4 h-4" /> Gerar combinação</>
+                }
+              </button>
+              {result && (
+                <button onClick={save}
+                  disabled={saveMutation.isPending}
+                  className="py-3.5 px-4 rounded-2xl font-bold text-sm flex items-center gap-2 transition-all border border-white/20 text-white hover:bg-white/10">
+                  <Save className="w-4 h-4" />
+                  {saveMutation.isPending ? 'A guardar...' : 'Guardar'}
+                </button>
+              )}
+            </div>
+            {savedMsg && (
+              <p className="text-center text-xs font-bold" style={{ color: savedMsg.startsWith('✓') ? '#4ade80' : '#fbbf24' }}>
+                {savedMsg}
+              </p>
+            )}
           </div>
         </div>
+
+        {/* Métricas (só quando há resultado) */}
+        {result && metrics && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+            className="rounded-3xl border border-white/10 p-5 space-y-4"
+            style={{ background: 'rgba(255,255,255,0.04)' }}>
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                <BarChart2 className="w-3.5 h-3.5" /> Análise da Combinação
+              </p>
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black"
+                style={{
+                  background: confidence >= 55 ? 'rgba(99,102,241,0.2)' : 'rgba(100,100,100,0.2)',
+                  color: confidence >= 55 ? '#a5b4fc' : '#94a3b8',
+                  border: `1px solid ${confidence >= 55 ? 'rgba(99,102,241,0.4)' : 'rgba(100,100,100,0.3)'}`,
+                }}>
+                <Shield className="w-3 h-3" /> Score: {confidence}%
+              </div>
+            </div>
+
+            <MetricBar
+              label="Anti-bias humano"
+              value={metrics.antiHuman}
+              color="#6366f1"
+              tooltip="Evita datas, sequências e padrões que jogadores humanos preferem"
+            />
+            <MetricBar
+              label="Distribuição espacial"
+              value={metrics.distribution}
+              color="#8b5cf6"
+              tooltip="Números bem espalhados pelo range — cobertura máxima do espaço"
+            />
+            <MetricBar
+              label="Originalidade histórica"
+              value={metrics.originality}
+              color="#06b6d4"
+              tooltip="Quanto esta combinação difere dos resultados reais anteriores"
+            />
+
+            <div className="pt-2 border-t border-white/10">
+              <p className="text-[10px] text-slate-500 leading-relaxed">
+                Score calculado com base em {draws.length} sorteios históricos.
+                <strong className="text-slate-400"> Lembrete:</strong> nenhum algoritmo pode prever loterias.
+                Este score mede qualidade da distribuição, não probabilidade de acerto.
+              </p>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Stats do histórico */}
+        {draws.length > 0 && currentLottery && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            className="rounded-2xl border border-white/10 p-4"
+            style={{ background: 'rgba(255,255,255,0.03)' }}>
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-3 flex items-center gap-1">
+              <TrendingUp className="w-3 h-3" /> Contexto histórico
+            </p>
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                ['Sorteios', draws.length.toLocaleString()],
+                ['Range', `${currentLottery.main_min}–${currentLottery.main_max}`],
+                ['Combinações', `${(factorial(currentLottery.main_max) / (factorial(currentLottery.main_count) * factorial(currentLottery.main_max - currentLottery.main_count))).toExponential(1)}`],
+              ].map(([l, v]) => (
+                <div key={l} className="text-center p-2.5 rounded-xl" style={{ background: 'rgba(255,255,255,0.05)' }}>
+                  <p className="text-sm font-black text-white">{v}</p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">{l}</p>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+
       </div>
     </div>
   );
+}
+
+function factorial(n) {
+  if (n <= 1) return 1;
+  // Aproximação de Stirling para números grandes
+  if (n > 20) return Math.sqrt(2 * Math.PI * n) * Math.pow(n / Math.E, n);
+  let r = 1;
+  for (let i = 2; i <= n; i++) r *= i;
+  return r;
 }
