@@ -33,8 +33,11 @@ export default function SuggestionsHistory() {
   const { data: lotteries = [] } = useQuery({
     queryKey: ['lotteries'],
     queryFn: () => base44.entities.Lottery.filter({ is_active: true }),
-    onSuccess: (d) => { if (d.length && !selectedLottery) setSelectedLottery(d[0].id); }
   });
+
+  React.useEffect(() => {
+    if (lotteries.length > 0 && !selectedLottery) setSelectedLottery(lotteries[0].id);
+  }, [lotteries, selectedLottery]);
 
   React.useEffect(() => {
     if (lotteries.length > 0 && !selectedLottery) setSelectedLottery(lotteries[0].id);
