@@ -318,6 +318,53 @@ function SuggestionCard({ s, onValidate, validatingId, lottery }) {
         </div>
       )}
 
+      {/* Score detalhado (se disponível nos parâmetros) */}
+      {s.parameters?.score_parts && (
+        <div>
+          <p className="text-[9px] font-bold text-slate-600 uppercase tracking-wider mb-2">Score do motor (v3.1)</p>
+          <div className="grid grid-cols-3 gap-1.5">
+            {[
+              ['Num. Modelo', s.parameters.score_parts.numberModel],
+              ['Assinatura', ((s.parameters.score_parts.sumFit||0)+(s.parameters.score_parts.parityFit||0)+(s.parameters.score_parts.spanFit||0)+(s.parameters.score_parts.zoneFit||0)+(s.parameters.score_parts.consecFit||0))/5],
+              ['Afinid. Pares', s.parameters.score_parts.pairAffinity],
+              ['Posicional', s.parameters.score_parts.positionalFit],
+              ['Originalidade', s.parameters.score_parts.originality],
+            ].map(([label, val]) => {
+              const pct = Math.round((val || 0) * 100);
+              const col = pct >= 70 ? '#4ade80' : pct >= 40 ? '#fbbf24' : '#f87171';
+              return (
+                <div key={label} className="rounded-lg p-2" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <p className="text-[8px] text-slate-500 mb-1">{label}</p>
+                  <div className="flex items-center gap-1.5">
+                    <div className="flex-1 bg-white/10 rounded-full h-1">
+                      <div className="h-1 rounded-full" style={{ width: `${pct}%`, background: col }} />
+                    </div>
+                    <span className="text-[9px] font-bold" style={{ color: col }}>{pct}%</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Backtest resumo (se disponível) */}
+      {s.parameters?.backtest?.samples > 0 && (
+        <div className="rounded-xl p-3" style={{ background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.15)' }}>
+          <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-2">Backtest na geração</p>
+          <div className="flex flex-wrap gap-3 text-[10px]">
+            <span className="text-slate-400">Média: <strong className="text-indigo-300">{s.parameters.backtest.avgHits}</strong> acertos</span>
+            <span className="text-slate-400">Lift: <strong style={{ color: s.parameters.backtest.lift > 0 ? '#4ade80' : '#f87171' }}>{s.parameters.backtest.lift > 0 ? '+' : ''}{(s.parameters.backtest.lift * 100).toFixed(0)}%</strong></span>
+            {s.parameters.backtest.ci95 && (
+              <span className="text-slate-400">IC95: <strong className="text-slate-300">[{s.parameters.backtest.ci95.lo}–{s.parameters.backtest.ci95.hi}]</strong></span>
+            )}
+            {s.parameters.backtest.pValue !== undefined && (
+              <span className="text-slate-400">p=<strong style={{ color: s.parameters.backtest.pValue < 0.05 ? '#4ade80' : '#fbbf24' }}>{s.parameters.backtest.pValue}</strong></span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Botão validar (pendente) */}
       {!s.was_validated && (
         <button onClick={() => onValidate(s)}
