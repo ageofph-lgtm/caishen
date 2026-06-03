@@ -7,7 +7,7 @@ import { Sparkles, Loader2, ArrowLeft, Save, RefreshCw, Info, TrendingUp, BarCha
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import NumberBall from '../components/lottery/NumberBall';
-import { predictNext, backtest, STRATEGIES } from '@/lib/predictionEngine';
+import { predictNext, backtest, STRATEGIES, clearModelCache } from '@/lib/predictionEngine';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // CAISHEN v3 — Gerador por Ensemble Estatístico
@@ -142,7 +142,7 @@ export default function Generator() {
         main_numbers: result.mainNumbers,
         extra_numbers: result.extraNumbers,
         algorithm: `caishen_v3_${strategy}`,
-        parameters: { metrics: result.metrics, backtest: result.backtest, draws_analyzed: result.drawsAnalyzed },
+        parameters: { metrics: result.metrics, score_parts: result.score_parts, backtest: result.backtest, draws_analyzed: result.drawsAnalyzed },
         confidence_score: result.confidence,
         was_validated: false,
         notes: `Ensemble v3 (${result.strategyLabel}). Backtest: ${result.backtest ? `${result.backtest.avgHits} acertos/sorteio vs ${result.backtest.randomBaseline} aleatório (n=${result.backtest.samples})` : 'n/d'}`,
@@ -177,7 +177,7 @@ export default function Generator() {
               <p className="text-xs" style={{ color: '#64748b' }}>Ensemble estatístico validado por backtest</p>
             </div>
           </div>
-          <Select value={selectedLottery || ''} onValueChange={v => { setSelectedLottery(v); setResult(null); }}>
+          <Select value={selectedLottery || ''} onValueChange={v => { clearModelCache(); setSelectedLottery(v); setResult(null); }}>
             <SelectTrigger className="w-36 text-xs" style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff' }}>
               <SelectValue placeholder="Loteria" />
             </SelectTrigger>
@@ -318,6 +318,31 @@ export default function Generator() {
                   <p className="text-[9px] mt-0.5" style={{ color: '#475569' }}>{l}</p>
                 </div>
               ))}
+            </div>
+            {/* IC 95% + p-value */}
+            <div className="grid grid-cols-2 gap-3 mt-1">
+              {bt.ci95 && (
+                <div className="text-center p-3 rounded-xl" style={{ background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.18)' }}>
+                  <p className="text-sm font-black" style={{ color: '#a5b4fc' }}>
+                    [{bt.ci95.lo} – {bt.ci95.hi}]
+                  </p>
+                  <p className="text-[9px] mt-0.5" style={{ color: '#475569' }}>IC 95% acertos/sorteio</p>
+                  <p className="text-[8px] mt-0.5" style={{ color: '#334155' }}>
+                    {bt.ci95.lo > bt.randomBaseline ? '✓ acima do acaso com 95% confiança' : '⚠ sobrepõe o acaso'}
+                  </p>
+                </div>
+              )}
+              {bt.pValue !== undefined && (
+                <div className="text-center p-3 rounded-xl" style={{ background: bt.pValue < 0.05 ? 'rgba(34,197,94,0.07)' : 'rgba(245,158,11,0.07)', border: `1px solid ${bt.pValue < 0.05 ? 'rgba(34,197,94,0.2)' : 'rgba(245,158,11,0.2)'}` }}>
+                  <p className="text-sm font-black" style={{ color: bt.pValue < 0.05 ? '#4ade80' : '#fbbf24' }}>
+                    p = {bt.pValue}
+                  </p>
+                  <p className="text-[9px] mt-0.5" style={{ color: '#475569' }}>vs baseline aleatório</p>
+                  <p className="text-[8px] mt-0.5" style={{ color: '#334155' }}>
+                    {bt.pValue < 0.05 ? '✓ resultado estatisticamente significativo' : '⚠ dentro do ruído estatístico'}
+                  </p>
+                </div>
+              )}
             </div>
             <p className="text-[10px] leading-relaxed" style={{ color: '#475569' }}>
               Testado em <strong style={{ color: '#64748b' }}>{bt.samples}</strong> sorteios reais (treino só com o passado).
