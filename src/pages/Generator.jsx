@@ -1,136 +1,24 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { base44 } from '@/api/base44Client';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Sparkles, Loader2, ArrowLeft, Save, RefreshCw, Info, TrendingUp, BarChart2, Shield } from 'lucide-react';
+import { Sparkles, Loader2, ArrowLeft, Save, RefreshCw, Info, TrendingUp, BarChart2, Shield, FlaskConical } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import NumberBall from '../components/lottery/NumberBall';
+import { predictNext, backtest, STRATEGIES } from '@/lib/predictionEngine';
 
 // ══════════════════════════════════════════════════════════════════════════════
-// CAISHEN v2 — Motor Anti-Humano
-// Filosofia: loterias são IMPREVISÍVEIS. O que é possível: gerar combinações
-// que humanos raramente escolhem, maximizando o prize-share potencial.
+// CAISHEN v3 — Gerador por Ensemble Estatístico
+// O motor (predictionEngine.js) aprende a assinatura dos sorteios reais e mede
+// a sua própria performance via backtest walk-forward. Aqui só orquestramos a UI.
 // ══════════════════════════════════════════════════════════════════════════════
-
-function humanBiasScore(combo) {
-  let penalty = 0;
-  const sorted = [...combo].sort((a, b) => a - b);
-  const n = sorted.length;
-  const low = sorted.filter(x => x <= 31).length;
-  if (low / n >= 0.8) penalty += 0.4;
-  else if (low / n >= 0.6) penalty += 0.2;
-  let seqCount = 0;
-  for (let i = 1; i < sorted.length; i++) {
-    if (sorted[i] - sorted[i-1] === 1) seqCount++;
-  }
-  if (seqCount >= 3) penalty += 0.4;
-  else if (seqCount >= 2) penalty += 0.2;
-  const mults = sorted.filter(x => x % 5 === 0).length;
-  if (mults >= 3) penalty += 0.2;
-  const mirrors = sorted.filter(x => x % 11 === 0 && x > 0).length;
-  if (mirrors >= 2) penalty += 0.2;
-  return Math.max(0, 1 - penalty);
-}
-
-function originalityScore(combo, draws) {
-  if (!draws || draws.length === 0) return 0.5;
-  const comboSet = new Set(combo);
-  let maxOverlap = 0;
-  for (const draw of draws.slice(0, 200)) {
-    const overlap = (draw.main_numbers || []).filter(n => comboSet.has(n)).length;
-    if (overlap > maxOverlap) maxOverlap = overlap;
-  }
-  return Math.max(0, 1 - (maxOverlap / combo.length) * 0.5);
-}
-
-function distributionScore(combo, mainMin, mainMax) {
-  const sorted = [...combo].sort((a, b) => a - b);
-  const n = sorted.length;
-  const range = mainMax - mainMin;
-  const evens = sorted.filter(x => x % 2 === 0).length;
-  const parityScore = 1 - Math.abs((evens / n) - 0.5) * 2;
-  const span = sorted[n-1] - sorted[0];
-  const spanScore = span / range;
-  const third = range / 3;
-  const zones = new Set(sorted.map(x => Math.floor((x - mainMin) / third)));
-  const zoneScore = zones.size / 3;
-  return (parityScore * 0.3 + spanScore * 0.4 + zoneScore * 0.3);
-}
-
-function calcConfidence(combo, draws, mainMin, mainMax) {
-  const human = humanBiasScore(combo);
-  const distrib = distributionScore(combo, mainMin, mainMax);
-  const original = originalityScore(combo, draws);
-  const raw = human * 0.35 + distrib * 0.40 + original * 0.25;
-  return Math.min(0.72, Math.max(0.28, raw));
-}
-
-function mulberry32(seed) {
-  let s = seed;
-  return () => {
-    s |= 0; s = s + 0x6D2B79F5 | 0;
-    let t = Math.imul(s ^ s >>> 15, 1 | s);
-    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
-  };
-}
-
-function generateAntiHuman(lottery, draws) {
-  const { main_count, main_min, main_max, extra_count, extra_min, extra_max } = lottery;
-  const range = main_max - main_min + 1;
-  const rng = mulberry32(Date.now());
-
-  let bestCombo = null;
-  let bestScore = -1;
-
-  for (let attempt = 0; attempt < 200; attempt++) {
-    const pool = Array.from({ length: range }, (_, i) => i + main_min);
-    for (let i = pool.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      [pool[i], pool[j]] = [pool[j], pool[i]];
-    }
-    const combo = pool.slice(0, main_count).sort((a, b) => a - b);
-    const score = humanBiasScore(combo) * 0.5 + distributionScore(combo, main_min, main_max) * 0.5;
-    if (score > bestScore) { bestScore = score; bestCombo = combo; }
-  }
-
-  let extras = [];
-  if (extra_count > 0) {
-    const rng2 = mulberry32(Date.now() + 1);
-    let bestExtra = null, bestExtraScore = -1;
-    const eRange = extra_max - extra_min + 1;
-    for (let attempt = 0; attempt < 50; attempt++) {
-      const ePool = Array.from({ length: eRange }, (_, i) => i + extra_min);
-      for (let i = ePool.length - 1; i > 0; i--) {
-        const j = Math.floor(rng2() * (i + 1));
-        [ePool[i], ePool[j]] = [ePool[j], ePool[i]];
-      }
-      const eCombo = ePool.slice(0, extra_count).sort((a, b) => a - b);
-      const s = distributionScore(eCombo, extra_min, extra_max);
-      if (s > bestExtraScore) { bestExtraScore = s; bestExtra = eCombo; }
-    }
-    extras = bestExtra || [];
-  }
-
-  const confidence = calcConfidence(bestCombo, draws, main_min, main_max);
-  return {
-    mainNumbers: bestCombo,
-    extraNumbers: extras,
-    confidence,
-    metrics: {
-      antiHuman: Math.round(humanBiasScore(bestCombo) * 100),
-      distribution: Math.round(distributionScore(bestCombo, main_min, main_max) * 100),
-      originality: Math.round(originalityScore(bestCombo, draws) * 100),
-    }
-  };
-}
 
 function nextDrawDate(lotteryName) {
   const today = new Date();
   const d = today.getDay();
-  let next = new Date(today);
+  const next = new Date(today);
   if (lotteryName === 'EuroMilhões') {
     if (d < 2) next.setDate(today.getDate() + (2 - d));
     else if (d < 5) next.setDate(today.getDate() + (5 - d));
@@ -180,9 +68,12 @@ function factorial(n) {
 
 export default function Generator() {
   const [selectedLottery, setSelectedLottery] = useState(null);
+  const [strategy, setStrategy] = useState('ensemble');
   const [result, setResult] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [savedMsg, setSavedMsg] = useState('');
+  // Cache de backtests: chave `${lotteryId}|${strategy}` → resultado.
+  const backtestCache = useRef({});
   const queryClient = useQueryClient();
 
   const { data: lotteries = [] } = useQuery({
@@ -190,7 +81,6 @@ export default function Generator() {
     queryFn: () => base44.entities.Lottery.filter({ is_active: true }),
   });
 
-  // TanStack v5: sem onSuccess no useQuery — usar useEffect
   useEffect(() => {
     if (lotteries.length > 0 && !selectedLottery) {
       setSelectedLottery(lotteries[0].id);
@@ -220,13 +110,20 @@ export default function Generator() {
     setResult(null);
     setTimeout(() => {
       try {
-        const r = generateAntiHuman(currentLottery, draws);
+        // Backtest (pesado) memoizado por loteria+estratégia.
+        const key = `${selectedLottery}|${strategy}`;
+        let bt = backtestCache.current[key];
+        if (!bt) {
+          bt = backtest(draws, currentLottery, { strategy });
+          backtestCache.current[key] = bt;
+        }
+        const r = predictNext(draws, currentLottery, { strategy, backtest: bt });
         setResult(r);
-      } catch(e) {
+      } catch (e) {
         console.error('Generation error:', e);
       }
       setIsGenerating(false);
-    }, 600);
+    }, 50);
   };
 
   const save = async () => {
@@ -244,13 +141,13 @@ export default function Generator() {
         draw_date: date,
         main_numbers: result.mainNumbers,
         extra_numbers: result.extraNumbers,
-        algorithm: 'anti_human_v2',
-        parameters: { metrics: result.metrics, draws_analyzed: draws.length },
+        algorithm: `caishen_v3_${strategy}`,
+        parameters: { metrics: result.metrics, backtest: result.backtest, draws_analyzed: result.drawsAnalyzed },
         confidence_score: result.confidence,
         was_validated: false,
-        notes: `Anti-humano v2. Anti-bias: ${result.metrics.antiHuman}%, Distribuição: ${result.metrics.distribution}%`,
+        notes: `Ensemble v3 (${result.strategyLabel}). Backtest: ${result.backtest ? `${result.backtest.avgHits} acertos/sorteio vs ${result.backtest.randomBaseline} aleatório (n=${result.backtest.samples})` : 'n/d'}`,
       });
-    } catch(e) {
+    } catch {
       setSavedMsg('Erro ao guardar');
       setTimeout(() => setSavedMsg(''), 3000);
     }
@@ -258,6 +155,9 @@ export default function Generator() {
 
   const metrics = result?.metrics;
   const confidence = result ? Math.round(result.confidence * 100) : null;
+  const bt = result?.backtest;
+  const liftPct = bt && bt.samples ? Math.round(bt.lift * 100) : null;
+  const stratMeta = STRATEGIES[strategy] || STRATEGIES.ensemble;
 
   return (
     <div className="min-h-screen p-4 md:p-6" style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)' }}>
@@ -273,8 +173,8 @@ export default function Generator() {
               </button>
             </Link>
             <div>
-              <h1 className="text-xl font-black text-white tracking-tight">Gerador Anti-Humano</h1>
-              <p className="text-xs" style={{ color: '#64748b' }}>Combinações que jogadores raramente escolhem</p>
+              <h1 className="text-xl font-black text-white tracking-tight">Motor de Previsão v3</h1>
+              <p className="text-xs" style={{ color: '#64748b' }}>Ensemble estatístico validado por backtest</p>
             </div>
           </div>
           <Select value={selectedLottery || ''} onValueChange={v => { setSelectedLottery(v); setResult(null); }}>
@@ -287,13 +187,34 @@ export default function Generator() {
           </Select>
         </div>
 
+        {/* Seletor de estratégia */}
+        <div className="grid grid-cols-5 gap-2">
+          {Object.entries(STRATEGIES).map(([key, s]) => {
+            const active = strategy === key;
+            return (
+              <button key={key} onClick={() => { setStrategy(key); setResult(null); }}
+                className="py-2 px-1 rounded-xl text-[10px] font-bold transition-all"
+                style={{
+                  background: active ? `${s.color}22` : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${active ? s.color : 'rgba(255,255,255,0.08)'}`,
+                  color: active ? s.color : '#94a3b8',
+                }}>
+                {s.label}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[11px] leading-relaxed -mt-2" style={{ color: '#64748b' }}>
+          <strong style={{ color: stratMeta.color }}>{stratMeta.label}:</strong> {stratMeta.desc}
+        </p>
+
         {/* Info banner */}
         <div className="rounded-2xl p-4 flex gap-3" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }}>
           <Info className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: '#f59e0b' }} />
           <p className="text-xs leading-relaxed" style={{ color: '#fcd34d' }}>
-            <strong>Como funciona:</strong> Loterias são aleatórias — ninguém pode prever resultados.
-            Este gerador cria combinações que humanos raramente escolhem (evita datas, sequências, números redondos).
-            Se ganhar, partilha o prémio com menos pessoas.
+            <strong>Transparência:</strong> uma loteria justa é imprevisível — nenhum motor garante acertos.
+            Este motor aprende a assinatura real dos sorteios e <strong>mede-se a si próprio</strong> (backtest):
+            o "lift" mostra, sem ilusões, o quanto supera (ou não) o puro acaso.
           </p>
         </div>
 
@@ -311,7 +232,7 @@ export default function Generator() {
                   </div>
                   <p className="text-sm text-center" style={{ color: '#64748b' }}>
                     {draws.length > 0
-                      ? `${draws.length} sorteios analisados — pronto para gerar`
+                      ? `${draws.length} sorteios no modelo — pronto para gerar`
                       : 'A carregar histórico...'}
                   </p>
                 </motion.div>
@@ -321,7 +242,7 @@ export default function Generator() {
                 <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                   className="flex flex-col items-center justify-center py-12 gap-4">
                   <Loader2 className="w-8 h-8 animate-spin" style={{ color: '#6366f1' }} />
-                  <p className="text-sm" style={{ color: '#64748b' }}>A analisar {draws.length} sorteios...</p>
+                  <p className="text-sm" style={{ color: '#64748b' }}>A treinar modelo e validar com backtest...</p>
                 </motion.div>
               )}
 
@@ -378,31 +299,67 @@ export default function Generator() {
           </div>
         </div>
 
-        {/* Métricas */}
+        {/* Backtest — a prova honesta */}
+        {result && bt && bt.samples > 0 && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+            className="rounded-3xl p-5 space-y-3"
+            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+            <p className="text-xs font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: '#94a3b8' }}>
+              <FlaskConical className="w-3.5 h-3.5" /> Backtest walk-forward
+            </p>
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                [bt.avgHits, 'Acertos/sorteio', '#a5b4fc'],
+                [bt.randomBaseline, 'Acaso (baseline)', '#64748b'],
+                [`${liftPct > 0 ? '+' : ''}${liftPct}%`, 'Lift vs acaso', liftPct > 5 ? '#4ade80' : liftPct < -5 ? '#f87171' : '#fbbf24'],
+              ].map(([v, l, c]) => (
+                <div key={l} className="text-center p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                  <p className="text-lg font-black" style={{ color: c }}>{v}</p>
+                  <p className="text-[9px] mt-0.5" style={{ color: '#475569' }}>{l}</p>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] leading-relaxed" style={{ color: '#475569' }}>
+              Testado em <strong style={{ color: '#64748b' }}>{bt.samples}</strong> sorteios reais (treino só com o passado).
+              Melhor resultado: <strong style={{ color: '#64748b' }}>{bt.best} acertos</strong> ·
+              taxa de 2+ acertos: <strong style={{ color: '#64748b' }}>{Math.round(bt.hitRate2 * 100)}%</strong>.
+              {Math.abs(liftPct) <= 5
+                ? ' Lift próximo de zero confirma a natureza aleatória — honesto e esperado.'
+                : liftPct > 5
+                  ? ' Lift positivo: esta estratégia bateu o acaso neste histórico.'
+                  : ' Lift negativo neste histórico — experimente outra estratégia.'}
+            </p>
+          </motion.div>
+        )}
+
+        {/* Métricas da combinação */}
         {result && metrics && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
             className="rounded-3xl p-5 space-y-4"
             style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
             <div className="flex items-center justify-between">
               <p className="text-xs font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: '#94a3b8' }}>
-                <BarChart2 className="w-3.5 h-3.5" /> Análise da Combinação
+                <BarChart2 className="w-3.5 h-3.5" /> Encaixe no modelo real
               </p>
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black"
                 style={{ background: 'rgba(99,102,241,0.15)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.3)' }}>
-                <Shield className="w-3 h-3" /> Score {confidence}%
+                <Shield className="w-3 h-3" /> Confiança {confidence}%
               </div>
             </div>
-            <MetricBar label="Anti-bias humano" value={metrics.antiHuman} color="#6366f1"
-              tooltip="Evita datas, sequências e padrões que jogadores humanos preferem" />
-            <MetricBar label="Distribuição espacial" value={metrics.distribution} color="#8b5cf6"
-              tooltip="Números bem espalhados — cobertura máxima do range" />
-            <MetricBar label="Originalidade histórica" value={metrics.originality} color="#06b6d4"
-              tooltip="Distância desta combinação face a resultados reais anteriores" />
+            <MetricBar label="Força dos números (freq/atraso/momentum)" value={metrics.numberModel} color="#6366f1"
+              tooltip="Quão fortes são os números escolhidos no modelo per-número" />
+            <MetricBar label="Assinatura estatística" value={metrics.signature} color="#8b5cf6"
+              tooltip="Encaixe em soma, paridade, dispersão, zonas e consecutivos dos sorteios reais" />
+            <MetricBar label="Afinidade de pares" value={metrics.pairAffinity} color="#ec4899"
+              tooltip="Frequência histórica com que estes números saíram juntos" />
+            <MetricBar label="Encaixe posicional" value={metrics.positional} color="#06b6d4"
+              tooltip="Cada número cai na faixa típica da sua posição ordenada" />
+            <MetricBar label="Originalidade" value={metrics.originality} color="#10b981"
+              tooltip="Distância face aos sorteios recentes — evita repetir o passado" />
             <div style={{ paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
               <p className="text-[10px] leading-relaxed" style={{ color: '#475569' }}>
-                Score calculado com base em {draws.length} sorteios.
-                <strong style={{ color: '#64748b' }}> Lembrete:</strong> nenhum algoritmo pode prever loterias.
-                Este score mede distribuição, não probabilidade de acerto.
+                <strong style={{ color: '#64748b' }}>Importante:</strong> estas métricas medem o encaixe estatístico,
+                não a probabilidade de ganhar. A confiança deriva do <strong>lift real do backtest</strong>, não de promessas.
               </p>
             </div>
           </motion.div>
