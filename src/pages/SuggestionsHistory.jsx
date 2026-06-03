@@ -18,6 +18,13 @@ function matchColor(n) {
 }
 
 function algoLabel(algo) {
+  // Motor v3 — ensemble estatístico por estratégia
+  if (algo === 'caishen_v3_ensemble') return { label: 'Ensemble v3', color: '#6366f1' };
+  if (algo === 'caishen_v3_hot') return { label: 'Quentes v3', color: '#f97316' };
+  if (algo === 'caishen_v3_overdue') return { label: 'Atrasados v3', color: '#06b6d4' };
+  if (algo === 'caishen_v3_pattern') return { label: 'Padrão Real v3', color: '#8b5cf6' };
+  if (algo === 'caishen_v3_antihuman') return { label: 'Anti-Humano v3', color: '#10b981' };
+  // Legado
   if (algo === 'anti_human_v2') return { label: 'Anti-Humano v2', color: '#6366f1' };
   if (algo === 'quantum_chaos_lln') return { label: 'Chaos+LLN v1', color: '#8b5cf6' };
   if (algo === 'auto_learning_ai') return { label: 'Auto-Learning', color: '#0891b2' };
