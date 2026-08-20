@@ -1,0 +1,52 @@
+{
+  "name": "Lottery",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Nome da loteria (ex: EuroMilh\u00f5es, Totoloto)"
+    },
+    "main_count": {
+      "type": "integer",
+      "description": "Quantidade de n\u00fameros principais"
+    },
+    "main_min": {
+      "type": "integer",
+      "description": "N\u00famero m\u00ednimo principal"
+    },
+    "main_max": {
+      "type": "integer",
+      "description": "N\u00famero m\u00e1ximo principal"
+    },
+    "extra_count": {
+      "type": "integer",
+      "description": "Quantidade de n\u00fameros extras"
+    },
+    "extra_min": {
+      "type": "integer",
+      "description": "N\u00famero m\u00ednimo extra"
+    },
+    "extra_max": {
+      "type": "integer",
+      "description": "N\u00famero m\u00e1ximo extra"
+    },
+    "extra_name": {
+      "type": "string",
+      "description": "Nome dos n\u00fameros extras (ex: Estrelas, N\u00ba Sorte)"
+    },
+    "theme_color": {
+      "type": "string",
+      "description": "Cor tema da loteria (hex)"
+    },
+    "is_active": {
+      "type": "boolean",
+      "default": true
+    }
+  },
+  "required": [
+    "name",
+    "main_count",
+    "main_min",
+    "main_max"
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "name": "Suggestion",
+  "type": "object",
+  "properties": {
+    "lottery_id": {
+      "type": "string",
+      "description": "ID da loteria"
+    },
+    "draw_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Data do sorteio para qual foi gerada a sugest\u00e3o"
+    },
+    "main_numbers": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      }
+    },
+    "extra_numbers": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      }
+    },
+    "confidence_score": {
+      "type": "number",
+      "description": "Pontua\u00e7\u00e3o de confian\u00e7a da sugest\u00e3o"
+    },
+    "algorithm": {
+      "type": "string",
+      "description": "Algoritmo utilizado"
+    },
+    "parameters": {
+      "type": "object",
+      "description": "Par\u00e2metros usados na gera\u00e7\u00e3o"
+    },
+    "actual_main_numbers": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      },
+      "description": "N\u00fameros que realmente sa\u00edram"
+    },
+    "actual_extra_numbers": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      },
+      "description": "N\u00fameros extras que realmente sa\u00edram"
+    },
+    "matches_main": {
+      "type": "integer",
+      "description": "Quantidade de acertos nos n\u00fameros principais"
+    },
+    "matches_extra": {
+      "type": "integer",
+      "description": "Quantidade de acertos nos n\u00fameros extras"
+    },
+    "was_validated": {
+      "type": "boolean",
+      "default": false,
+      "description": "Se j\u00e1 foi comparado com o resultado real"
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "lottery_id",
+    "main_numbers"
+  ]
+}

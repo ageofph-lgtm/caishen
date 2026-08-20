@@ -1,0 +1,34 @@
+{
+  "name": "Draw",
+  "type": "object",
+  "properties": {
+    "lottery_id": {
+      "type": "string",
+      "description": "ID da loteria"
+    },
+    "draw_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Data do sorteio"
+    },
+    "main_numbers": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      },
+      "description": "N\u00fameros principais sorteados"
+    },
+    "extra_numbers": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      },
+      "description": "N\u00fameros extras sorteados"
+    }
+  },
+  "required": [
+    "lottery_id",
+    "draw_date",
+    "main_numbers"
+  ]
+}
