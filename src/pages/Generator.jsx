@@ -3,11 +3,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { base44 } from '@/api/base44Client';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Sparkles, Loader2, ArrowLeft, Save, RefreshCw, Info, TrendingUp, BarChart2, Shield, FlaskConical } from 'lucide-react';
+import { Sparkles, Loader2, ArrowLeft, Save, RefreshCw, Info, TrendingUp, BarChart2, Shield, FlaskConical, ShieldCheck, Dices, Wand2, AlertTriangle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import NumberBall from '../components/lottery/NumberBall';
-import { predictNext, backtest, STRATEGIES, clearModelCache } from '@/lib/predictionEngine';
+import { predictNext, backtest, selectBestStrategy, STRATEGIES, clearModelCache } from '@/lib/predictionEngine';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // CAISHEN v3 — Gerador por Ensemble Estatístico
@@ -110,15 +110,29 @@ export default function Generator() {
     setResult(null);
     setTimeout(() => {
       try {
+        let effective = strategy;
+        let autoInfo = null;
+
+        // Modo Auto: os dados escolhem — testa todas e exige significância.
+        if (strategy === 'auto') {
+          const key = `${selectedLottery}|__auto__`;
+          autoInfo = backtestCache.current[key];
+          if (!autoInfo) {
+            autoInfo = selectBestStrategy(draws, currentLottery);
+            backtestCache.current[key] = autoInfo;
+          }
+          effective = autoInfo.strategy;
+        }
+
         // Backtest (pesado) memoizado por loteria+estratégia.
-        const key = `${selectedLottery}|${strategy}`;
+        const key = `${selectedLottery}|${effective}`;
         let bt = backtestCache.current[key];
         if (!bt) {
-          bt = backtest(draws, currentLottery, { strategy });
+          bt = autoInfo?.results?.[effective] || backtest(draws, currentLottery, { strategy: effective });
           backtestCache.current[key] = bt;
         }
-        const r = predictNext(draws, currentLottery, { strategy, backtest: bt });
-        setResult(r);
+        const r = predictNext(draws, currentLottery, { strategy: effective, backtest: bt });
+        setResult({ ...r, autoInfo, requestedStrategy: strategy });
       } catch (e) {
         console.error('Generation error:', e);
       }
@@ -141,11 +155,19 @@ export default function Generator() {
         draw_date: date,
         main_numbers: result.mainNumbers,
         extra_numbers: result.extraNumbers,
-        algorithm: `caishen_v3_${strategy}`,
-        parameters: { metrics: result.metrics, score_parts: result.score_parts, backtest: result.backtest, draws_analyzed: result.drawsAnalyzed },
+        algorithm: `caishen_v4_${result.strategy}`,
+        parameters: {
+          metrics: result.metrics,
+          score_parts: result.score_parts,
+          backtest: result.backtest,
+          reliability: result.reliability,
+          requested_strategy: result.requestedStrategy,
+          auto_reason: result.autoInfo?.reason || null,
+          draws_analyzed: result.drawsAnalyzed,
+        },
         confidence_score: result.confidence,
         was_validated: false,
-        notes: `Ensemble v3 (${result.strategyLabel}). Backtest: ${result.backtest ? `${result.backtest.avgHits} acertos/sorteio vs ${result.backtest.randomBaseline} aleatório (n=${result.backtest.samples})` : 'n/d'}`,
+        notes: `Motor v4 (${result.strategyLabel}). ${result.backtest ? `Backtest: ${result.backtest.avgHits} vs ${result.backtest.randomBaseline} acaso, p=${result.backtest.pValue} (${result.backtest.significant ? 'significativo' : 'ruído'}), n=${result.backtest.samples}.` : ''} Viés: p=${result.reliability?.bias?.pValue} (${result.reliability?.bias?.biased ? 'detetado' : 'sem viés'}). Dados: ${result.reliability?.dataQuality?.used} usados, ${result.reliability?.dataQuality?.rejected} rejeitados.`,
       });
     } catch {
       setSavedMsg('Erro ao guardar');
@@ -173,8 +195,8 @@ export default function Generator() {
               </button>
             </Link>
             <div>
-              <h1 className="text-xl font-black text-white tracking-tight">Motor de Previsão v3</h1>
-              <p className="text-xs" style={{ color: '#64748b' }}>Ensemble estatístico validado por backtest</p>
+              <h1 className="text-xl font-black text-white tracking-tight">Motor de Previsão v4</h1>
+              <p className="text-xs" style={{ color: '#64748b' }}>Rigor estatístico · viés testado · significância real</p>
             </div>
           </div>
           <Select value={selectedLottery || ''} onValueChange={v => { clearModelCache(); setSelectedLottery(v); setResult(null); }}>
@@ -186,6 +208,18 @@ export default function Generator() {
             </SelectContent>
           </Select>
         </div>
+
+        {/* Modo Auto — deixa os dados escolherem */}
+        <button onClick={() => { setStrategy('auto'); setResult(null); }}
+          className="w-full py-3 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 transition-all"
+          style={{
+            background: strategy === 'auto' ? 'rgba(217,119,6,0.18)' : 'rgba(255,255,255,0.04)',
+            border: `1px solid ${strategy === 'auto' ? '#d97706' : 'rgba(255,255,255,0.08)'}`,
+            color: strategy === 'auto' ? '#fbbf24' : '#94a3b8',
+          }}>
+          <Wand2 className="w-3.5 h-3.5" />
+          Modo Auto — os dados escolhem a estratégia
+        </button>
 
         {/* Seletor de estratégia */}
         <div className="grid grid-cols-5 gap-2">
@@ -205,7 +239,9 @@ export default function Generator() {
           })}
         </div>
         <p className="text-[11px] leading-relaxed -mt-2" style={{ color: '#64748b' }}>
-          <strong style={{ color: stratMeta.color }}>{stratMeta.label}:</strong> {stratMeta.desc}
+          {strategy === 'auto'
+            ? <><strong style={{ color: '#fbbf24' }}>Auto:</strong> testa todas as estratégias por backtest e escolhe a que os dados justificam com significância estatística. Se nenhuma bater o acaso, escolhe Anti-Humano e explica porquê.</>
+            : <><strong style={{ color: stratMeta.color }}>{stratMeta.label}:</strong> {stratMeta.desc}</>}
         </p>
 
         {/* Info banner */}
@@ -213,8 +249,9 @@ export default function Generator() {
           <Info className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: '#f59e0b' }} />
           <p className="text-xs leading-relaxed" style={{ color: '#fcd34d' }}>
             <strong>Transparência:</strong> uma loteria justa é imprevisível — nenhum motor garante acertos.
-            Este motor aprende a assinatura real dos sorteios e <strong>mede-se a si próprio</strong> (backtest):
-            o "lift" mostra, sem ilusões, o quanto supera (ou não) o puro acaso.
+            O que é previsível é <strong>quantos</strong> acertos terás, não <strong>quais</strong> números saem.
+            Este motor testa o sorteio quanto a viés real, mede-se por backtest com significância
+            estatística, e só chama "sinal" ao que sobrevive ao teste. O resto, diz que é ruído.
           </p>
         </div>
 
@@ -299,6 +336,143 @@ export default function Generator() {
           </div>
         </div>
 
+        {/* Modo Auto — o raciocínio do programa */}
+        {result?.autoInfo && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+            className="rounded-3xl p-5 space-y-2"
+            style={{ background: 'rgba(217,119,6,0.07)', border: '1px solid rgba(217,119,6,0.22)' }}>
+            <p className="text-xs font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: '#fbbf24' }}>
+              <Wand2 className="w-3.5 h-3.5" /> Decisão automática
+            </p>
+            <p className="text-xs leading-relaxed" style={{ color: '#fcd34d' }}>
+              {result.autoInfo.reason}
+            </p>
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {result.autoInfo.ranked.map(r => (
+                <span key={r.key} className="text-[9px] font-bold px-2 py-0.5 rounded-full"
+                  style={{
+                    background: r.key === result.strategy ? 'rgba(217,119,6,0.25)' : 'rgba(255,255,255,0.05)',
+                    color: r.key === result.strategy ? '#fbbf24' : '#64748b',
+                    border: `1px solid ${r.key === result.strategy ? 'rgba(217,119,6,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                  }}>
+                  {STRATEGIES[r.key]?.label}: {(r.lift * 100).toFixed(1)}% (p={r.pValue})
+                </span>
+              ))}
+            </div>
+          </motion.div>
+        )}
+
+        {/* Qualidade dos dados — confiabilidade começa aqui */}
+        {result?.reliability && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+            className="rounded-3xl p-5 space-y-3"
+            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+            <p className="text-xs font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: '#94a3b8' }}>
+              <ShieldCheck className="w-3.5 h-3.5" /> Integridade dos dados
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="text-center p-3 rounded-xl" style={{ background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.2)' }}>
+                <p className="text-lg font-black" style={{ color: '#4ade80' }}>{result.reliability.dataQuality.used}</p>
+                <p className="text-[9px] mt-0.5" style={{ color: '#475569' }}>sorteios válidos usados</p>
+              </div>
+              <div className="text-center p-3 rounded-xl"
+                style={{
+                  background: result.reliability.dataQuality.rejected > 0 ? 'rgba(248,113,113,0.07)' : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${result.reliability.dataQuality.rejected > 0 ? 'rgba(248,113,113,0.2)' : 'rgba(255,255,255,0.08)'}`,
+                }}>
+                <p className="text-lg font-black" style={{ color: result.reliability.dataQuality.rejected > 0 ? '#f87171' : '#64748b' }}>
+                  {result.reliability.dataQuality.rejected}
+                </p>
+                <p className="text-[9px] mt-0.5" style={{ color: '#475569' }}>registos corrompidos excluídos</p>
+              </div>
+            </div>
+            {result.reliability.dataQuality.rejectedSamples.length > 0 && (
+              <div className="space-y-1 pt-1">
+                {result.reliability.dataQuality.rejectedSamples.map((r, i) => (
+                  <p key={i} className="text-[10px] flex items-start gap-1.5" style={{ color: '#f87171' }}>
+                    <AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                    <span><strong>{r.draw_date}</strong>: {r.reason}</span>
+                  </p>
+                ))}
+                <p className="text-[9px] pt-1" style={{ color: '#475569' }}>
+                  Estes registos estavam a contaminar o modelo. Agora ficam de fora.
+                </p>
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {/* Teste de viés — há realmente algo a prever? */}
+        {result?.reliability?.bias && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+            className="rounded-3xl p-5 space-y-2"
+            style={{
+              background: result.reliability.bias.biased ? 'rgba(34,197,94,0.07)' : 'rgba(255,255,255,0.04)',
+              border: `1px solid ${result.reliability.bias.biased ? 'rgba(34,197,94,0.25)' : 'rgba(255,255,255,0.08)'}`,
+            }}>
+            <p className="text-xs font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: '#94a3b8' }}>
+              <Dices className="w-3.5 h-3.5" /> O sorteio é justo? (qui-quadrado)
+            </p>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px]" style={{ color: '#64748b' }}>
+                χ² = {result.reliability.bias.chi2} · gl = {result.reliability.bias.df} · p = {result.reliability.bias.pValue}
+              </span>
+              <span className="text-[10px] font-black px-2.5 py-1 rounded-full"
+                style={{
+                  background: result.reliability.bias.biased ? 'rgba(34,197,94,0.15)' : 'rgba(100,116,139,0.15)',
+                  color: result.reliability.bias.biased ? '#4ade80' : '#94a3b8',
+                }}>
+                {result.reliability.bias.biased ? 'VIÉS DETETADO' : 'SEM VIÉS'}
+              </span>
+            </div>
+            <p className="text-[10px] leading-relaxed" style={{ color: '#475569' }}>
+              {result.reliability.bias.biased
+                ? 'Há desvio real da uniformidade: as frequências ("números quentes") têm justificação estatística nesta loteria.'
+                : 'As frequências são compatíveis com puro acaso. Logo "números quentes" são ruído, não sinal — e o programa não finge o contrário.'}
+            </p>
+          </motion.div>
+        )}
+
+        {/* Prever o imprevisível — o que a matemática GARANTE */}
+        {result?.reliability && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+            className="rounded-3xl p-5 space-y-3"
+            style={{ background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.22)' }}>
+            <p className="text-xs font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: '#a5b4fc' }}>
+              <TrendingUp className="w-3.5 h-3.5" /> Prever o imprevisível
+            </p>
+            <p className="text-[11px] leading-relaxed" style={{ color: '#c7d2fe' }}>
+              Não é possível prever <strong>quais</strong> números saem. É possível prever, com rigor matemático,
+              <strong> quantos</strong> vais acertar:
+            </p>
+            <div className="text-center p-4 rounded-2xl" style={{ background: 'rgba(99,102,241,0.12)' }}>
+              <p className="text-2xl font-black" style={{ color: '#a5b4fc' }}>
+                {result.reliability.likelyRange.min}–{result.reliability.likelyRange.max} acertos
+              </p>
+              <p className="text-[10px] mt-1" style={{ color: '#818cf8' }}>
+                com {(result.reliability.likelyRange.coverage * 100).toFixed(1)}% de certeza
+              </p>
+            </div>
+            <div className="space-y-1">
+              {result.reliability.odds.filter(o => o.probability > 0.0001).map(o => (
+                <div key={o.hits} className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold w-14" style={{ color: '#64748b' }}>{o.hits} acerto{o.hits !== 1 ? 's' : ''}</span>
+                  <div className="flex-1 rounded-full h-1.5" style={{ background: 'rgba(255,255,255,0.07)' }}>
+                    <div className="h-1.5 rounded-full" style={{ width: `${o.probability * 100}%`, background: '#6366f1' }} />
+                  </div>
+                  <span className="text-[10px] font-bold w-24 text-right" style={{ color: '#94a3b8' }}>
+                    {(o.probability * 100).toFixed(2)}% · 1 em {o.oneIn.toLocaleString()}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px]" style={{ color: '#475569' }}>
+              Esperado por aposta: <strong style={{ color: '#64748b' }}>{result.reliability.expectedHits} acertos</strong> (±{result.reliability.hitSd}).
+              Esta é a ordem real dentro do caos.
+            </p>
+          </motion.div>
+        )}
+
         {/* Backtest — a prova honesta */}
         {result && bt && bt.samples > 0 && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
@@ -347,13 +521,18 @@ export default function Generator() {
             <p className="text-[10px] leading-relaxed" style={{ color: '#475569' }}>
               Testado em <strong style={{ color: '#64748b' }}>{bt.samples}</strong> sorteios reais (treino só com o passado).
               Melhor resultado: <strong style={{ color: '#64748b' }}>{bt.best} acertos</strong> ·
-              taxa de 2+ acertos: <strong style={{ color: '#64748b' }}>{Math.round(bt.hitRate2 * 100)}%</strong>.
-              {Math.abs(liftPct) <= 5
-                ? ' Lift próximo de zero confirma a natureza aleatória — honesto e esperado.'
-                : liftPct > 5
-                  ? ' Lift positivo: esta estratégia bateu o acaso neste histórico.'
-                  : ' Lift negativo neste histórico — experimente outra estratégia.'}
+              taxa de 2+ acertos: <strong style={{ color: '#64748b' }}>{Math.round(bt.hitRate2 * 100)}%</strong>
+              {bt.zScore !== undefined && <> · z = <strong style={{ color: '#64748b' }}>{bt.zScore}</strong></>}.
             </p>
+            {bt.verdict && (
+              <p className="text-[11px] font-bold leading-relaxed px-3 py-2 rounded-xl"
+                style={{
+                  background: bt.significant ? 'rgba(34,197,94,0.1)' : 'rgba(100,116,139,0.1)',
+                  color: bt.significant ? '#4ade80' : '#94a3b8',
+                }}>
+                Veredicto: {bt.verdict}
+              </p>
+            )}
           </motion.div>
         )}
 
@@ -368,7 +547,7 @@ export default function Generator() {
               </p>
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black"
                 style={{ background: 'rgba(99,102,241,0.15)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.3)' }}>
-                <Shield className="w-3 h-3" /> Confiança {confidence}%
+                <Shield className="w-3 h-3" /> P(2+ acertos) {confidence}%
               </div>
             </div>
             <MetricBar label="Força dos números (freq/atraso/momentum)" value={metrics.numberModel} color="#6366f1"
