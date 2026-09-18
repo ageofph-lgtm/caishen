@@ -21,6 +21,11 @@
 //   • predictNext guarda score_parts completo para análise posterior
 // ══════════════════════════════════════════════════════════════════════════════
 
+import {
+  validateDraws, biasTest, backtestSignificance,
+  calibratedConfidence, hitDistribution, oddsTable,
+} from './statsEngine.js';
+
 // ── PRNG determinístico (mulberry32) ────────────────────────────────────────
 export function mulberry32(seed) {
   let s = seed >>> 0;
@@ -358,7 +363,11 @@ export function predictNext(draws, lottery, options = {}) {
   const seed = options.seed || (Date.now() >>> 0);
   const rng = mulberry32(seed);
 
-  const sorted = [...draws].sort((a, b) => new Date(b.draw_date) - new Date(a.draw_date));
+  // v4 — HIGIENE DE DADOS: sorteios corrompidos nunca entram no modelo.
+  // (ex.: um registo do EuroMilhões com "50" arquivado como EuroDreams)
+  const { valid, rejected } = validateDraws(draws, lottery);
+
+  const sorted = [...valid].sort((a, b) => new Date(b.draw_date) - new Date(a.draw_date));
   const model = buildModel(sorted, lottery);
   const numScore = numberScores(model, strat.numberBlend);
 
@@ -380,7 +389,12 @@ export function predictNext(draws, lottery, options = {}) {
   }
 
   const extras = pickExtras(model, lottery, rng);
-  const confidence = confidenceFromBacktest(best, options.backtest);
+
+  // v4 — CONFIABILIDADE: tudo abaixo é medido, nada é inventado.
+  const bias = biasTest(sorted, lottery);                       // há viés real no sorteio?
+  const hitDist = hitDistribution(lottery);                     // o que o acaso permite prever
+  const calib = calibratedConfidence(lottery, options.backtest); // P(2+ acertos) real
+  const confidence = calib.p2plus;
 
   return {
     mainNumbers: best.combo,
@@ -388,6 +402,21 @@ export function predictNext(draws, lottery, options = {}) {
     strategy: strategyKey,
     strategyLabel: strat.label,
     confidence,
+    // ── Painel de confiabilidade (v4) ──────────────────────────────────────
+    reliability: {
+      bias,                                  // qui-quadrado: viés detetável?
+      odds: oddsTable(lottery),              // odds exatas por escalão
+      expectedHits: +hitDist.mean.toFixed(3),
+      hitSd: +hitDist.sd.toFixed(3),
+      // "Prever o imprevisível": o intervalo que a aleatoriedade GARANTE.
+      likelyRange: predictionInterval(hitDist.probs, 0.95),
+      confidenceBasis: calib,                // base hipergeométrica + lift encolhido
+      dataQuality: {
+        used: sorted.length,
+        rejected: rejected.length,
+        rejectedSamples: rejected.slice(0, 5),
+      },
+    },
     metrics: {
       numberModel: Math.round(best.parts.numberModel * 100),
       signature: Math.round(((best.parts.sumFit + best.parts.parityFit + best.parts.spanFit + best.parts.zoneFit + best.parts.consecFit) / 5) * 100),
@@ -402,14 +431,22 @@ export function predictNext(draws, lottery, options = {}) {
   };
 }
 
-function confidenceFromBacktest(best, backtest) {
-  if (backtest && backtest.samples > 0 && backtest.randomBaseline > 0) {
-    const lift = backtest.lift;
-    const c = 0.45 + Math.max(-0.15, Math.min(0.4, lift));
-    return Math.max(0.30, Math.min(0.85, c));
+// ── "Prever o imprevisível" ──────────────────────────────────────────────────
+// Não dá para prever QUAIS números saem. Dá para prever, com rigor matemático,
+// QUANTOS acertos a aposta terá — o intervalo de maior densidade que cobre `mass`
+// da probabilidade. Para EuroDreams: 95% dos casos caem em 0–2 acertos.
+// Isto é a ordem real dentro do caos: a forma da distribuição é previsível.
+export function predictionInterval(probs, mass = 0.95) {
+  const idx = probs.map((p, k) => ({ k, p })).sort((a, b) => b.p - a.p);
+  const chosen = new Set();
+  let acc = 0;
+  for (const { k, p } of idx) {
+    chosen.add(k);
+    acc += p;
+    if (acc >= mass) break;
   }
-  const raw = best ? best.total : 0.5;
-  return Math.max(0.28, Math.min(0.7, raw));
+  const ks = [...chosen].sort((a, b) => a - b);
+  return { min: ks[0], max: ks[ks.length - 1], coverage: +acc.toFixed(4) };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -490,24 +527,12 @@ export function backtest(draws, lottery, options = {}) {
     };
   }
 
-  // ── Comparação vs 1000 baselines aleatórios ──────────────────────────────
-  // Quantos baselines aleatórios ficam ABAIXO do motor? → p-value empírico
-  const randRng = mulberry32(0xA1EA);
-  let motorBeatsRandom = 0;
-  const RAND_SIMS = 1000;
-  for (let s = 0; s < RAND_SIMS; s++) {
-    let randTotal = 0;
-    for (let t = 0; t < samples; t++) {
-      // Simula acertos de uma aposta aleatória uniforme
-      const randCombo = weightedSample({}, pool, lottery.main_count, randRng);
-      // Comparar contra hitsList[t] actual não temos o actual guardado,
-      // então usamos o valor esperado por sorteio (hipergeométrico)
-      randTotal += randomBaseline;
-    }
-    const randAvg = randTotal / samples;
-    if (avgHits > randAvg) motorBeatsRandom++;
-  }
-  const pValue = +(1 - motorBeatsRandom / RAND_SIMS).toFixed(3);
+  // ── v4: SIGNIFICÂNCIA ESTATÍSTICA REAL ───────────────────────────────────
+  // A versão anterior somava a MESMA constante 1000 vezes, pelo que o p-value
+  // era sempre 0.000 ou 1.000 — um falso "altamente significativo" para
+  // qualquer lift. Aqui usamos um teste z contra a hipergeométrica exata:
+  // H0 = o motor é indistinguível do acaso. Só há sinal se p < 0.05.
+  const sig = backtestSignificance(avgHits, samples, lottery);
 
   return {
     samples,
@@ -516,7 +541,55 @@ export function backtest(draws, lottery, options = {}) {
     lift: +lift.toFixed(3),
     hitRate2: samples ? +(atLeast2 / samples).toFixed(3) : 0,
     best,
-    ci95,       // { lo, hi } IC 95% do avgHits por bootstrap
-    pValue,     // probabilidade de o motor ter performance por acaso
+    ci95,                            // IC 95% do avgHits por bootstrap
+    pValue: sig.pValue,              // p-value honesto (teste z bicaudal)
+    zScore: sig.z,
+    significant: sig.significant,    // true só se p < 0.05
+    stdError: sig.se,
+    // Veredicto legível — o que o utilizador precisa mesmo de saber.
+    verdict: !sig.significant
+      ? 'Indistinguível do acaso (como esperado numa loteria justa)'
+      : lift > 0
+        ? 'Desvio positivo estatisticamente significativo'
+        : 'Desvio negativo estatisticamente significativo',
+  };
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// selectBestStrategy (modo Auto) — deixa os DADOS escolherem, não o palpite.
+// Corre o backtest de todas as estratégias e escolhe:
+//   • a de melhor lift, SE for estatisticamente significativa;
+//   • senão, 'antihuman' — porque quando nada bate o acaso (o caso normal),
+//     a única vantagem real e demonstrável é reduzir a partilha do prémio.
+// Devolve também o raciocínio, para o programa se explicar.
+// ──────────────────────────────────────────────────────────────────────────────
+export function selectBestStrategy(draws, lottery, options = {}) {
+  const keys = Object.keys(STRATEGIES).filter(k => k !== 'auto');
+  const results = {};
+  for (const k of keys) {
+    results[k] = backtest(draws, lottery, { ...options, strategy: k });
+  }
+  const ranked = keys
+    .map(k => ({ key: k, ...results[k] }))
+    .sort((a, b) => b.lift - a.lift);
+
+  const top = ranked[0];
+  const anySignificant = ranked.find(r => r.significant && r.lift > 0);
+
+  if (anySignificant) {
+    return {
+      strategy: anySignificant.key,
+      results,
+      ranked,
+      reason: `"${STRATEGIES[anySignificant.key].label}" bateu o acaso de forma estatisticamente significativa (p=${anySignificant.pValue}, n=${anySignificant.samples}).`,
+      dataDriven: true,
+    };
+  }
+  return {
+    strategy: 'antihuman',
+    results,
+    ranked,
+    reason: `Nenhuma estratégia bateu o acaso com significância (melhor: "${STRATEGIES[top.key].label}", lift ${(top.lift * 100).toFixed(1)}%, p=${top.pValue}). Isto CONFIRMA que o sorteio é justo. Escolhida "Anti-Humano": não aumenta a hipótese de ganhar, mas reduz a partilha do prémio — a única vantagem real que existe.`,
+    dataDriven: false,
   };
 }
